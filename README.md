@@ -2,6 +2,9 @@
 
 **Chat OpenAI Streaming** is a simple, customizable chat interface for real-time conversation with any API compatible with the `/v1/chat/completions` endpoint (such as OpenAI or Azure OpenAI). The app supports live streaming responses and persistently saves chat history in your browser for a smooth and continuous experience. It's ideal for prompt testing or managing conversations with ease.
 
+**Try it live here:**  
+[https://pepepaco.github.io/MiniChat/](https://pepepaco.github.io/MiniChat/)
+
 ## Features
 
 - **Live Streaming:** Receive assistant responses token-by-token with a live indicator for speed and token count.
@@ -38,4 +41,3 @@
 
 > **Fun fact:**  
 > Much of the code and interface for this chat app was developed and refined using the app itself! The project served as its own coding assistant, iteratively reviewing and improving its own code and features through conversations within the very same environment you see here.
-
