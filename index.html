@@ -9,6 +9,8 @@
 			rel="stylesheet"
 		/>
 		<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+		<!-- Opcional: para sanitizar HTML marcado, activar si quieres seguridad contra XSS -->
+		<!-- <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.2/dist/purify.min.js"></script> -->
 		<style>
 			html,
 			body {
@@ -160,6 +162,15 @@
 				border-radius: 12px;
 				margin-left: 8px;
 			}
+			/* Fade out para alertas */
+			@keyframes fadeOut {
+				to {
+					opacity: 0;
+				}
+			}
+			.alert.fade-out {
+				animation: fadeOut 1.5s forwards;
+			}
 		</style>
 	</head>
 	<body>
@@ -228,26 +239,37 @@
 			</form>
 		</div>
 		<script>
-			// --------- CHATID utility ---------
+			// Helpers
+			const save = (key, value) =>
+				localStorage.setItem(key, JSON.stringify(value));
+			const load = key => {
+				try {
+					return JSON.parse(localStorage.getItem(key));
+				} catch {
+					return null;
+				}
+			};
+
+			// Chat ID generator
+			const generateChatId = () =>
+				self.crypto?.randomUUID?.() ||
+				`${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+			// Get or create chatId from URL
 			const getOrCreateChatId = () => {
 				const params = new URLSearchParams(window.location.search);
 				let chatId = params.get('chat');
 				if (!chatId) {
-					chatId =
-						self.crypto?.randomUUID?.() ||
-						`${Date.now().toString(36)}${Math.random()
-							.toString(36)
-							.substring(2, 8)}`;
+					chatId = generateChatId();
 					params.set('chat', chatId);
 					window.history.replaceState(null, '', `?${params.toString()}`);
 				}
 				return chatId;
 			};
 
+			// Global DOM Elements
 			const chatId = getOrCreateChatId();
 			document.getElementById('chatIdTag').textContent = chatId;
-
-			// --------- SETTINGS ---------
 			const settingsPanel = document.getElementById('settingsPanel');
 			const settingsToggle = document.getElementById('settingsToggle');
 			const settingsForm = document.getElementById('settingsForm');
@@ -255,22 +277,31 @@
 			const apiKeyInput = document.getElementById('apiKey');
 			const modelInput = document.getElementById('model');
 			const systemPromptInput = document.getElementById('systemPrompt');
+			const chatMessages = document.getElementById('chatMessages');
+			const chatForm = document.getElementById('chatForm');
+			const userInput = document.getElementById('userInput');
+			const newChatBtn = document.getElementById('newChatBtn');
 
+			// Settings: Load config on startup
 			const loadConfig = () => {
-				const config =
-					JSON.parse(localStorage.getItem('chatConfig-global')) || {};
-				urlBaseInput.value = config.urlBase || 'https://api.openai.com/v1';
-				apiKeyInput.value = config.apiKey || '';
-				modelInput.value = config.model || 'gpt-3.5-turbo';
-				systemPromptInput.value = config.systemPrompt || '';
+				const {
+					urlBase = 'https://api.openai.com/v1',
+					apiKey = '',
+					model = 'gpt-3.5-turbo',
+					systemPrompt = '',
+				} = load('chatConfig-global') || {};
+				urlBaseInput.value = urlBase;
+				apiKeyInput.value = apiKey;
+				modelInput.value = model;
+				systemPromptInput.value = systemPrompt;
 			};
 			loadConfig();
 
-			settingsToggle.onclick = () => {
+			settingsToggle.addEventListener('click', () => {
 				settingsPanel.classList.toggle('show');
-			};
+			});
 
-			settingsForm.onsubmit = e => {
+			settingsForm.addEventListener('submit', e => {
 				e.preventDefault();
 				const config = {
 					urlBase: urlBaseInput.value.trim(),
@@ -278,64 +309,56 @@
 					model: modelInput.value.trim(),
 					systemPrompt: systemPromptInput.value.trim(),
 				};
-				localStorage.setItem('chatConfig-global', JSON.stringify(config));
+				save('chatConfig-global', config);
 				settingsPanel.classList.remove('show');
 				showAlert('Settings saved successfully.');
-			};
+			});
 
-			// --------- AUTOSAVE CONTROL ---------
+			// Chat logic
 			let autosaveEnabled = false;
 			let conversation = [];
-			const chatMessages = document.getElementById('chatMessages');
-			const chatForm = document.getElementById('chatForm');
-			const userInput = document.getElementById('userInput');
 
 			const saveConversation = () => {
-				if (!autosaveEnabled) return;
-				localStorage.setItem(
-					`chatHistory-${chatId}`,
-					JSON.stringify(conversation),
-				);
+				if (autosaveEnabled) save(`chatHistory-${chatId}`, conversation);
 			};
 
 			const restoreHistory = () => {
 				autosaveEnabled = false;
-				const raw = localStorage.getItem(`chatHistory-${chatId}`);
+				const history = load(`chatHistory-${chatId}`) || [];
 				chatMessages.innerHTML = '';
-				if (raw) {
-					try {
-						let history = JSON.parse(raw) || [];
-						if (history.length > 0 && history.at(-1).role === 'user') {
-							history.pop();
-						}
-						history = history.filter(
-							msg => !(msg.role === 'assistant' && !msg.content),
-						);
-						conversation = history;
-						for (const msg of conversation) {
-							addMessage(msg.content, msg.role === 'user' ? 'user' : 'openai');
-						}
-					} catch {
-						conversation = [];
-						localStorage.removeItem(`chatHistory-${chatId}`);
-					}
-				} else {
-					conversation = [];
+				let cleanHistory = [...history];
+				// Remove last user if pending (no assistant response)
+				if (cleanHistory.length > 0 && cleanHistory.at(-1).role === 'user') {
+					cleanHistory.pop();
 				}
+				// Remove empty assistant messages
+				cleanHistory = cleanHistory.filter(
+					msg => !(msg.role === 'assistant' && !msg.content),
+				);
+				conversation = cleanHistory;
+				conversation.forEach(msg =>
+					addMessage(msg.content, msg.role === 'user' ? 'user' : 'openai'),
+				);
 				autosaveEnabled = true;
 			};
 
-			const addMessage = (inner, sender) => {
+			// Markdown rendering helper, with optional sanitization
+			const renderMarkdown = str =>
+				// window.DOMPurify ? marked.parse(str, { sanitizer: DOMPurify.sanitize }) : marked.parse(str);
+				marked.parse(str);
+
+			// Message renderer
+			const addMessage = (content, sender) => {
 				const div = document.createElement('div');
 				div.className = `message ${sender}`;
 				div.innerHTML = `<span>${
-					sender === 'openai' ? marked.parse(inner) : inner
+					sender === 'openai' ? renderMarkdown(content) : content
 				}</span>`;
 				chatMessages.appendChild(div);
-				chatMessages.scrollTop = chatMessages.scrollHeight;
+				div.scrollIntoView({ behavior: 'smooth', block: 'end' });
 			};
 
-			// --------- STREAMING OPENAI ---------
+			// Streaming OpenAI
 			const streamOpenAI = async ({
 				urlBase,
 				apiKey,
@@ -348,7 +371,6 @@
 				const startTime = performance.now();
 				let lastText = '';
 				let tokenCount = 0;
-				let done = false;
 				try {
 					const response = await fetch(`${urlBase}/chat/completions`, {
 						method: 'POST',
@@ -367,19 +389,17 @@
 							stream: true,
 						}),
 					});
-
 					if (!response.ok) throw new Error('Response error');
 					const reader = response.body.getReader();
 					const decoder = new TextDecoder('utf-8');
 					let buffer = '';
-
+					let done = false;
 					while (true) {
 						const { value, done: doneReading } = await reader.read();
 						if (doneReading) break;
 						buffer += decoder.decode(value, { stream: true });
 						const lines = buffer.split('\n');
 						buffer = lines.pop();
-
 						for (let line of lines) {
 							line = line.trim();
 							if (!line.startsWith('data:')) continue;
@@ -414,38 +434,32 @@
 				}
 			};
 
-			// --------- RESTORE HISTORY ON INIT ---------
+			// Restore history on load
 			restoreHistory();
 
-			// --------- STREAMING AND SENDING ----------
+			// Send & streaming handler
 			let messageCounter = 0;
-
-			chatForm.addEventListener('submit', e => {
+			const handleChatSubmit = e => {
 				e.preventDefault();
 				const text = userInput.value.trim();
 				if (!text) return;
 				addMessage(text, 'user');
 				userInput.value = '';
 
-				const config =
-					JSON.parse(localStorage.getItem('chatConfig-global')) || {};
-				const sysPrompt = config.systemPrompt || '';
+				const { urlBase, apiKey, model, systemPrompt } =
+					load('chatConfig-global') || {};
+				const sysPrompt = systemPrompt || '';
 
 				conversation.push({ role: 'user', content: text });
 				saveConversation();
 
-				let convToSend = conversation.slice();
+				let convToSend = [...conversation];
 				if (
 					sysPrompt &&
 					!(convToSend.length && convToSend[0].role === 'system')
 				) {
 					convToSend = [{ role: 'system', content: sysPrompt }, ...convToSend];
 				}
-
-				// NOTE: Saving the message twice is redundant,
-				// but was kept in the original code for compatibility.
-				// conversation.push({ role: 'user', content: text });
-				// saveConversation();
 
 				messageCounter++;
 				const replyId = `streamreply-${messageCounter}`;
@@ -455,7 +469,6 @@
 				const replyElem = document.getElementById(replyId);
 				const speedElem = document.getElementById(speedId);
 				const msgDiv = chatMessages.lastChild;
-
 				let lastRendered = 0;
 				const RENDER_EACH = 10;
 
@@ -466,7 +479,7 @@
 					conversation: convToSend,
 					onChunk: (content, tokens, seconds) => {
 						if (tokens - lastRendered >= RENDER_EACH || tokens === 1) {
-							replyElem.innerHTML = marked.parse(content);
+							replyElem.innerHTML = renderMarkdown(content);
 							lastRendered = tokens;
 						}
 						if (tokens > 0)
@@ -480,41 +493,44 @@
 							conversation.push({ role: 'assistant', content });
 							saveConversation();
 						}
-						replyElem.innerHTML = marked.parse(content);
+						replyElem.innerHTML = renderMarkdown(content);
 						speedElem.innerText = `Done. Total tokens: ${tokens}, Max speed: ${(
 							tokens / (seconds || 1)
 						).toFixed(2)} tks/sec`;
 					},
-					onError: err => {
+					onError: () => {
 						chatMessages.lastChild.remove();
 						addMessage('Connection error (streaming failed).', 'openai');
 					},
 				});
-			});
+			};
 
-			// --------- NEW CHAT ----------
-			const newChatBtn = document.getElementById('newChatBtn');
+			chatForm.addEventListener('submit', handleChatSubmit);
+
+			// New chat button
 			newChatBtn.addEventListener('click', () => {
 				if (
 					confirm(
 						'Are you sure you want to start a new chat? Current conversation will be deleted.',
 					)
 				) {
-					const newId =
-						self.crypto?.randomUUID?.() ||
-						`${Date.now().toString(36)}${Math.random()
-							.toString(36)
-							.substring(2, 8)}`;
+					const newId = generateChatId();
 					window.location.search = `?chat=${newId}`;
 				}
 			});
 
-			// --------- NOTIFICATION ---------
+			// Notification with fade-out
 			const showAlert = (text, timeout = 1800) => {
 				const div = document.createElement('div');
-				div.className = 'alert alert-success position-fixed shadow';
-				div.style =
-					'top: 16px; left:50%; transform:translateX(-50%); z-index:1000; min-width:200px; text-align:center;';
+				div.className = 'alert alert-success position-fixed shadow fade-out';
+				div.style = `
+        top: 16px;
+        left:50%;
+        transform:translateX(-50%);
+        z-index:1000;
+        min-width:200px;
+        text-align:center;
+      `;
 				div.textContent = text;
 				document.body.appendChild(div);
 				setTimeout(() => div.remove(), timeout);
