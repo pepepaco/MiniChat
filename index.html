@@ -1,540 +1,490 @@
 <!DOCTYPE html>
 <html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<title>Chat OpenAI Streaming - Persistent Markdown</title>
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<link
-			href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-			rel="stylesheet"
-		/>
-		<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-		<!-- Opcional: para sanitizar HTML marcado, activar si quieres seguridad contra XSS -->
-		<!-- <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.2/dist/purify.min.js"></script> -->
-		<style>
-			html,
-			body {
-				height: 100%;
-				margin: 0;
-				padding: 0;
-				width: 100vw;
-			}
-			body {
-				background: #f8f9fa;
-				min-height: 100vh;
-				width: 100vw;
-			}
+
+<head>
+	<meta charset="UTF-8">
+	<title>OpenAI Chat Streaming - Markdown</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<!-- Bootstrap (latest) -->
+	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+	<!-- Marked.js for Markdown support -->
+	<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+	<!-- Optional: Enable if you need sanitization 
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.2/dist/purify.min.js"></script>
+  -->
+	<style>
+		html,
+		body {
+			height: 100%;
+			width: 100vw;
+			margin: 0;
+			padding: 0;
+		}
+
+		body {
+			background: #f8f9fa;
+			min-height: 100vh;
+			width: 100vw;
+		}
+
+		.chat-window {
+			width: 100vw;
+			height: 100vh;
+			display: flex;
+			flex-direction: column;
+			background: #fff;
+		}
+
+		.chat-messages {
+			flex: 1;
+			overflow-y: auto;
+			padding: 16px;
+			border-bottom: 1px solid #eee;
+			background: #fff;
+		}
+
+		.message.user {
+			text-align: right;
+		}
+
+		.message.openai {
+			text-align: left;
+		}
+
+		.message span {
+			display: inline-block;
+			padding: 8px 12px;
+			border-radius: 16px;
+			margin: 6px 0;
+			max-width: 80%;
+			word-break: break-word;
+		}
+
+		.message.user span {
+			background: #0d6efd;
+			color: #fff;
+		}
+
+		.message.openai span {
+			background: #e9ecef;
+			color: #333;
+		}
+
+		.settings-toggle {
+			cursor: pointer;
+			color: #0d6efd;
+			font-size: 1.1em;
+			float: right;
+		}
+
+		.settings-panel {
+			display: none;
+			border-bottom: 1px solid #eee;
+			padding: 16px;
+			background: #f7f7f7;
+		}
+
+		.settings-panel.show {
+			display: block;
+		}
+
+		.new-chat-btn {
+			margin-right: 10px;
+			background: #198754;
+			color: #fff;
+			border: none;
+			padding: 5px 16px;
+			border-radius: 20px;
+			font-size: 1em;
+			cursor: pointer;
+		}
+
+		.new-chat-btn:hover {
+			background: #157347;
+		}
+
+		.chat-id-tag {
+			font-size: .75em;
+			color: #888;
+			font-family: monospace;
+			background: #eee;
+			padding: 1px 7px;
+			border-radius: 12px;
+			margin-left: 8px;
+		}
+
+		.speed-indicator {
+			font-size: .85em;
+			color: #888;
+			padding-left: 1em;
+		}
+
+		@media(max-width:600px) {
 			.chat-window {
 				width: 100vw;
 				height: 100vh;
-				margin: 0;
 				border-radius: 0;
-				box-shadow: none;
-				background: #fff;
-				padding: 0;
-				display: flex;
-				flex-direction: column;
+				margin: 0;
 			}
+
 			.chat-messages {
-				flex: 1 1 auto;
-				overflow-y: auto;
-				padding: 16px;
-				border-bottom: 1px solid #eee;
-				background: #fff;
-			}
-			.message.user {
-				text-align: right;
-			}
-			.message.openai {
-				text-align: left;
-			}
-			.message span {
-				display: inline-block;
-				padding: 8px 12px;
-				border-radius: 16px;
-				margin: 6px 0;
-				max-width: 80%;
-				word-break: break-word;
-			}
-			.message.user span {
-				background: #0d6efd;
-				color: #fff;
-			}
-			.message.openai span {
-				background: #e9ecef;
-				color: #333;
-			}
-			.settings-toggle {
-				cursor: pointer;
-				color: #0d6efd;
-				font-size: 1.1em;
-				float: right;
-			}
-			.settings-panel {
-				display: none;
-				border-bottom: 1px solid #eee;
-				padding: 16px;
-				background: #f7f7f7;
-			}
-			.settings-panel.show {
-				display: block;
-			}
-			.message.openai span h1,
-			.message.openai span h2,
-			.message.openai span h3 {
-				margin-top: 0.5em;
-			}
-			.message.openai span table {
-				width: 100%;
-			}
-			.message.openai span table,
-			.message.openai span th,
-			.message.openai span td {
-				border: 1px solid #dee2e6;
-				border-collapse: collapse;
-			}
-			.message.openai span th,
-			.message.openai span td {
-				padding: 0.5em;
-			}
-			.message.openai span ul,
-			.message.openai span ol {
-				padding-left: 1.5em;
-			}
-			.message.openai span code {
-				background: #f1f3f5;
-				padding: 2px 6px;
-				border-radius: 4px;
-			}
-			.message.openai span pre {
-				background: #f1f3f5;
 				padding: 8px;
-				border-radius: 6px;
 			}
-			@media (max-width: 600px) {
-				.chat-window {
-					width: 100vw;
-					height: 100vh;
-					border-radius: 0;
-					margin: 0;
-				}
-				.chat-messages {
-					padding: 8px;
-				}
-				.settings-panel,
-				.p-3 {
-					padding: 8px !important;
-				}
-				.message span {
-					max-width: 100%;
-					font-size: 1em;
-				}
+
+			.settings-panel,
+			.p-3 {
+				padding: 8px !important;
 			}
-			code,
-			pre {
-				font-family: 'Fira Mono', 'Consolas', monospace;
-			}
-			.speed-indicator {
-				font-size: 0.85em;
-				color: #888;
-				padding-left: 1em;
-			}
-			.new-chat-btn {
-				margin-right: 10px;
-				background: #198754;
-				color: white;
-				border: none;
-				padding: 5px 16px;
-				border-radius: 20px;
+
+			.message span {
+				max-width: 100%;
 				font-size: 1em;
-				cursor: pointer;
-				transition: background 0.2s;
 			}
-			.new-chat-btn:hover {
-				background: #157347;
+		}
+
+		code,
+		pre {
+			font-family: 'Fira Mono', 'Consolas', monospace;
+			background: #f1f3f5;
+			border-radius: 4px;
+			padding: 2px 6px;
+		}
+
+		@keyframes fadeOut {
+			to {
+				opacity: 0;
 			}
-			.chat-id-tag {
-				font-size: 0.75em;
-				color: #888;
-				font-family: monospace;
-				background: #eee;
-				padding: 1px 7px;
-				border-radius: 12px;
-				margin-left: 8px;
-			}
-			/* Fade out para alertas */
-			@keyframes fadeOut {
-				to {
-					opacity: 0;
-				}
-			}
-			.alert.fade-out {
-				animation: fadeOut 1.5s forwards;
-			}
-		</style>
-	</head>
-	<body>
-		<div class="chat-window">
-			<div
-				class="p-3 border-bottom d-flex align-items-center justify-content-between"
-			>
-				<span class="fw-bold">
-					Chat OpenAI <small class="text-secondary">Streaming Markdown</small>
-					<span
-						id="chatIdTag"
-						class="chat-id-tag"
-						title="Conversation ID"
-					></span>
-				</span>
-				<div>
-					<button class="new-chat-btn" id="newChatBtn" title="New chat">
-						New chat
-					</button>
-					<span class="settings-toggle" id="settingsToggle" title="Settings"
-						>&#9881;</span
-					>
+		}
+
+		.alert.fade-out {
+			animation: fadeOut 1.5s forwards;
+		}
+	</style>
+</head>
+
+<body>
+	<div class="chat-window">
+		<header class="p-3 border-bottom d-flex align-items-center justify-content-between">
+			<span class="fw-bold">
+				Chat OpenAI <small class="text-secondary">Streaming Markdown</small>
+				<span id="chatIdTag" class="chat-id-tag" title="Conversation ID"></span>
+			</span>
+			<div>
+				<button class="new-chat-btn" id="newChatBtn" title="New Chat">New chat</button>
+				<span class="settings-toggle" id="settingsToggle" title="Settings">&#9881;</span>
+			</div>
+		</header>
+		<section class="settings-panel" id="settingsPanel">
+			<form id="settingsForm" autocomplete="off">
+				<div class="mb-2">
+					<label class="form-label">Base URL (up to /v1)</label>
+					<input type="text" class="form-control" id="urlBase" required />
 				</div>
-			</div>
-			<div class="settings-panel" id="settingsPanel">
-				<form id="settingsForm" autocomplete="off">
-					<div class="mb-2">
-						<label class="form-label">Base URL (up to /v1)</label>
-						<input type="text" class="form-control" id="urlBase" required />
-					</div>
-					<div class="mb-2">
-						<label class="form-label">API Key</label>
-						<input type="text" class="form-control" id="apiKey" required />
-					</div>
-					<div class="mb-2">
-						<label class="form-label">Model</label>
-						<input type="text" class="form-control" id="model" required />
-					</div>
-					<div class="mb-2">
-						<label class="form-label">System prompt</label>
-						<textarea
-							class="form-control"
-							id="systemPrompt"
-							rows="2"
-							placeholder="Example: You are a helpful and concise assistant."
-						></textarea>
-						<small class="text-secondary">Controls AI behavior.</small>
-					</div>
-					<button type="submit" class="btn btn-primary btn-sm w-100">
-						Save settings
-					</button>
-				</form>
-			</div>
-			<div class="chat-messages" id="chatMessages"></div>
-			<form class="d-flex p-3 gap-2" id="chatForm" autocomplete="off">
-				<input
-					type="text"
-					class="form-control flex-grow-1"
-					id="userInput"
-					placeholder="Type your message..."
-					required
-				/>
-				<button class="btn btn-primary flex-shrink-0" type="submit">
-					Send
-				</button>
+				<div class="mb-2">
+					<label class="form-label">API Key</label>
+					<input type="text" class="form-control" id="apiKey" required />
+				</div>
+				<div class="mb-2">
+					<label class="form-label">Model</label>
+					<input type="text" class="form-control" id="model" required />
+				</div>
+				<div class="mb-2">
+					<label class="form-label">System prompt</label>
+					<textarea class="form-control" id="systemPrompt" rows="2"
+						placeholder="Example: You are a helpful and concise assistant."></textarea>
+					<small class="text-secondary">Controls AI behavior.</small>
+				</div>
+				<button type="submit" class="btn btn-primary btn-sm w-100">Save settings</button>
 			</form>
-		</div>
-		<script>
-			// Helpers
-			const save = (key, value) =>
-				localStorage.setItem(key, JSON.stringify(value));
-			const load = key => {
-				try {
-					return JSON.parse(localStorage.getItem(key));
-				} catch {
-					return null;
-				}
-			};
+		</section>
+		<main class="chat-messages" id="chatMessages"></main>
+		<form class="d-flex p-3 gap-2" id="chatForm" autocomplete="off">
+			<input type="text" class="form-control flex-grow-1" id="userInput" placeholder="Type your message..."
+				required />
+			<button class="btn btn-primary flex-shrink-0" type="submit">Send</button>
+		</form>
+	</div>
+	<script>
+		// --------- Storage Helpers ----------
+		/**
+		 * Save a value to localStorage.
+		 * @param {string} key
+		 * @param {*} value
+		 */
+		const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 
-			// Chat ID generator
-			const generateChatId = () =>
-				self.crypto?.randomUUID?.() ||
-				`${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+		/**
+		 * Retrieve and parse a value from localStorage.
+		 * @param {string} key
+		 * @returns {*}
+		 */
+		const load = key => {
+			try { return JSON.parse(localStorage.getItem(key)); }
+			catch { return null; }
+		};
 
-			// Get or create chatId from URL
-			const getOrCreateChatId = () => {
-				const params = new URLSearchParams(window.location.search);
-				let chatId = params.get('chat');
-				if (!chatId) {
-					chatId = generateChatId();
-					params.set('chat', chatId);
-					window.history.replaceState(null, '', `?${params.toString()}`);
-				}
-				return chatId;
-			};
+		// ---------- Chat ID Management ----------
+		/**
+		 * Generate a unique chat ID using browser crypto or fallback.
+		 * @returns {string}
+		 */
+		const generateChatId = () =>
+			globalThis.crypto?.randomUUID?.() ||
+			Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
-			// Global DOM Elements
-			const chatId = getOrCreateChatId();
-			document.getElementById('chatIdTag').textContent = chatId;
-			const settingsPanel = document.getElementById('settingsPanel');
-			const settingsToggle = document.getElementById('settingsToggle');
-			const settingsForm = document.getElementById('settingsForm');
-			const urlBaseInput = document.getElementById('urlBase');
-			const apiKeyInput = document.getElementById('apiKey');
-			const modelInput = document.getElementById('model');
-			const systemPromptInput = document.getElementById('systemPrompt');
-			const chatMessages = document.getElementById('chatMessages');
-			const chatForm = document.getElementById('chatForm');
-			const userInput = document.getElementById('userInput');
-			const newChatBtn = document.getElementById('newChatBtn');
+		/**
+		 * Extract chat ID from URL, or create and update history.
+		 * @returns {string}
+		 */
+		const getOrCreateChatId = () => {
+			const params = new URLSearchParams(location.search);
+			let chatId = params.get('chat');
+			if (!chatId) {
+				chatId = generateChatId();
+				params.set('chat', chatId);
+				history.replaceState(null, '', '?' + params.toString());
+			}
+			return chatId;
+		};
 
-			// Settings: Load config on startup
-			const loadConfig = () => {
-				const {
-					urlBase = 'https://api.openai.com/v1',
-					apiKey = '',
-					model = 'gpt-3.5-turbo',
-					systemPrompt = '',
-				} = load('chatConfig-global') || {};
-				urlBaseInput.value = urlBase;
-				apiKeyInput.value = apiKey;
-				modelInput.value = model;
-				systemPromptInput.value = systemPrompt;
-			};
-			loadConfig();
+		// ---------- DOM Elements ----------
+		const chatId = getOrCreateChatId();
+		document.getElementById('chatIdTag').textContent = chatId;
+		const settingsPanel = document.getElementById('settingsPanel');
+		const settingsToggle = document.getElementById('settingsToggle');
+		const settingsForm = document.getElementById('settingsForm');
+		const urlBaseInput = document.getElementById('urlBase');
+		const apiKeyInput = document.getElementById('apiKey');
+		const modelInput = document.getElementById('model');
+		const systemPromptInput = document.getElementById('systemPrompt');
+		const chatMessages = document.getElementById('chatMessages');
+		const chatForm = document.getElementById('chatForm');
+		const userInput = document.getElementById('userInput');
+		const newChatBtn = document.getElementById('newChatBtn');
 
-			settingsToggle.addEventListener('click', () => {
-				settingsPanel.classList.toggle('show');
+		// ---------- Configuration Management ----------
+		/**
+		 * Load configuration values from localStorage, populate form.
+		 */
+		const loadConfig = () => {
+			const config = load('chatConfig-global') ?? {};
+			urlBaseInput.value = config.urlBase ?? 'https://api.openai.com/v1';
+			apiKeyInput.value = config.apiKey ?? '';
+			modelInput.value = config.model ?? 'gpt-3.5-turbo';
+			systemPromptInput.value = config.systemPrompt ?? '';
+		};
+		loadConfig();
+
+		settingsToggle.addEventListener('click', () => {
+			settingsPanel.classList.toggle('show');
+		});
+
+		settingsForm.addEventListener('submit', e => {
+			e.preventDefault();
+			save('chatConfig-global', {
+				urlBase: urlBaseInput.value.trim(),
+				apiKey: apiKeyInput.value.trim(),
+				model: modelInput.value.trim(),
+				systemPrompt: systemPromptInput.value.trim()
 			});
+			settingsPanel.classList.remove('show');
+			showAlert('Settings saved.');
+		});
 
-			settingsForm.addEventListener('submit', e => {
-				e.preventDefault();
-				const config = {
-					urlBase: urlBaseInput.value.trim(),
-					apiKey: apiKeyInput.value.trim(),
-					model: modelInput.value.trim(),
-					systemPrompt: systemPromptInput.value.trim(),
-				};
-				save('chatConfig-global', config);
-				settingsPanel.classList.remove('show');
-				showAlert('Settings saved successfully.');
-			});
+		// ---------- Conversation History ----------
+		let autosaveEnabled = false;
+		let conversation = [];
 
-			// Chat logic
-			let autosaveEnabled = false;
-			let conversation = [];
+		/**
+		 * Save the current conversation to localStorage.
+		 */
+		const saveConversation = () =>
+			autosaveEnabled && save(`chatHistory-${chatId}`, conversation);
 
-			const saveConversation = () => {
-				if (autosaveEnabled) save(`chatHistory-${chatId}`, conversation);
-			};
+		/**
+		 * Restore conversation history from localStorage, clean it, display it.
+		 */
+		const restoreHistory = () => {
+			autosaveEnabled = false;
+			let history = load(`chatHistory-${chatId}`) ?? [];
+			chatMessages.innerHTML = '';
+			// Remove last user message if not answered
+			if (history.length && history.at(-1).role === 'user') history.pop();
+			// Filter out empty assistant messages
+			history = history.filter(msg => !(msg.role === 'assistant' && !msg.content));
+			conversation = history;
+			conversation.forEach(msg =>
+				addMessage(msg.content, msg.role === 'user' ? 'user' : 'openai')
+			);
+			autosaveEnabled = true;
+		};
 
-			const restoreHistory = () => {
-				autosaveEnabled = false;
-				const history = load(`chatHistory-${chatId}`) || [];
-				chatMessages.innerHTML = '';
-				let cleanHistory = [...history];
-				// Remove last user if pending (no assistant response)
-				if (cleanHistory.length > 0 && cleanHistory.at(-1).role === 'user') {
-					cleanHistory.pop();
-				}
-				// Remove empty assistant messages
-				cleanHistory = cleanHistory.filter(
-					msg => !(msg.role === 'assistant' && !msg.content),
-				);
-				conversation = cleanHistory;
-				conversation.forEach(msg =>
-					addMessage(msg.content, msg.role === 'user' ? 'user' : 'openai'),
-				);
-				autosaveEnabled = true;
-			};
+		// ---------- Markdown & Message Rendering ----------
+		/**
+		 * Render Markdown to safe HTML.
+		 * Use DOMPurify for additional XSS protection if needed.
+		 * @param {string} text
+		 * @returns {string}
+		 */
+		const renderMarkdown = text => marked.parse(text);
 
-			// Markdown rendering helper, with optional sanitization
-			const renderMarkdown = str =>
-				// window.DOMPurify ? marked.parse(str, { sanitizer: DOMPurify.sanitize }) : marked.parse(str);
-				marked.parse(str);
+		/**
+		 * Append a chat message to the DOM.
+		 * @param {string} content
+		 * @param {"user"|"openai"} sender
+		 */
+		const addMessage = (content, sender) => {
+			const div = document.createElement('div');
+			div.className = `message ${sender}`;
+			div.innerHTML = `<span>${sender === 'openai' ? renderMarkdown(content) : content}</span>`;
+			chatMessages.appendChild(div);
+			div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+		};
 
-			// Message renderer
-			const addMessage = (content, sender) => {
-				const div = document.createElement('div');
-				div.className = `message ${sender}`;
-				div.innerHTML = `<span>${
-					sender === 'openai' ? renderMarkdown(content) : content
-				}</span>`;
-				chatMessages.appendChild(div);
-				div.scrollIntoView({ behavior: 'smooth', block: 'end' });
-			};
-
-			// Streaming OpenAI
-			const streamOpenAI = async ({
-				urlBase,
-				apiKey,
-				model,
-				conversation,
-				onChunk,
-				onDone,
-				onError,
-			}) => {
-				const startTime = performance.now();
-				let lastText = '';
-				let tokenCount = 0;
-				try {
-					const response = await fetch(`${urlBase}/chat/completions`, {
-						method: 'POST',
-						headers: {
-							Authorization: urlBase.includes('openai.azure.com')
-								? apiKey
-								: `Bearer ${apiKey}`,
-							'api-key': urlBase.includes('openai.azure.com')
-								? apiKey
-								: undefined,
-							'Content-Type': 'application/json',
-						},
-						body: JSON.stringify({
-							model,
-							messages: conversation,
-							stream: true,
-						}),
-					});
-					if (!response.ok) throw new Error('Response error');
-					const reader = response.body.getReader();
-					const decoder = new TextDecoder('utf-8');
-					let buffer = '';
-					let done = false;
-					while (true) {
-						const { value, done: doneReading } = await reader.read();
-						if (doneReading) break;
-						buffer += decoder.decode(value, { stream: true });
-						const lines = buffer.split('\n');
-						buffer = lines.pop();
-						for (let line of lines) {
-							line = line.trim();
-							if (!line.startsWith('data:')) continue;
-							const jsonStr = line.replace('data:', '').trim();
-							if (jsonStr === '[DONE]') {
-								done = true;
-								break;
-							}
-							try {
-								const parsed = JSON.parse(jsonStr);
-								const delta = parsed.choices[0]?.delta?.content ?? '';
-								if (delta) {
-									lastText += delta;
-									tokenCount++;
-									onChunk?.(
-										lastText,
-										tokenCount,
-										(performance.now() - startTime) / 1000,
-									);
-								}
-							} catch {}
-						}
-						if (done) break;
-					}
-					onDone?.(
-						lastText,
-						tokenCount,
-						(performance.now() - startTime) / 1000,
-					);
-				} catch (err) {
-					onError?.(err);
-				}
-			};
-
-			// Restore history on load
-			restoreHistory();
-
-			// Send & streaming handler
-			let messageCounter = 0;
-			const handleChatSubmit = e => {
-				e.preventDefault();
-				const text = userInput.value.trim();
-				if (!text) return;
-				addMessage(text, 'user');
-				userInput.value = '';
-
-				const { urlBase, apiKey, model, systemPrompt } =
-					load('chatConfig-global') || {};
-				const sysPrompt = systemPrompt || '';
-
-				conversation.push({ role: 'user', content: text });
-				saveConversation();
-
-				let convToSend = [...conversation];
-				if (
-					sysPrompt &&
-					!(convToSend.length && convToSend[0].role === 'system')
-				) {
-					convToSend = [{ role: 'system', content: sysPrompt }, ...convToSend];
-				}
-
-				messageCounter++;
-				const replyId = `streamreply-${messageCounter}`;
-				const speedId = `speed-${messageCounter}`;
-				const htmlStream = `<span id="${replyId}"></span><br><small id="${speedId}" class="speed-indicator"></small>`;
-				addMessage(htmlStream, 'openai');
-				const replyElem = document.getElementById(replyId);
-				const speedElem = document.getElementById(speedId);
-				const msgDiv = chatMessages.lastChild;
-				let lastRendered = 0;
-				const RENDER_EACH = 10;
-
-				streamOpenAI({
-					urlBase: urlBaseInput.value.trim(),
-					apiKey: apiKeyInput.value.trim(),
-					model: modelInput.value.trim(),
-					conversation: convToSend,
-					onChunk: (content, tokens, seconds) => {
-						if (tokens - lastRendered >= RENDER_EACH || tokens === 1) {
-							replyElem.innerHTML = renderMarkdown(content);
-							lastRendered = tokens;
-						}
-						if (tokens > 0)
-							speedElem.innerText = `Tokens: ${tokens} • Speed: ${(
-								tokens / (seconds || 1)
-							).toFixed(2)} tks/sec`;
-						msgDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
+		// ---------- OpenAI Streaming ----------
+		/**
+		 * Stream OpenAI chat completions, calling back on each chunk.
+		 * @param {object} opts
+		 */
+		const streamOpenAI = async ({
+			urlBase, apiKey, model, conversation, onChunk, onDone, onError
+		}) => {
+			const startTime = performance.now();
+			let lastText = '';
+			let tokenCount = 0;
+			try {
+				const response = await fetch(`${urlBase}/chat/completions`, {
+					method: 'POST',
+					headers: {
+						Authorization: urlBase.includes('openai.azure.com') ? apiKey : `Bearer ${apiKey}`,
+						'api-key': urlBase.includes('openai.azure.com') ? apiKey : undefined,
+						'Content-Type': 'application/json'
 					},
-					onDone: (content, tokens, seconds) => {
-						if (content) {
-							conversation.push({ role: 'assistant', content });
-							saveConversation();
-						}
-						replyElem.innerHTML = renderMarkdown(content);
-						speedElem.innerText = `Done. Total tokens: ${tokens}, Max speed: ${(
-							tokens / (seconds || 1)
-						).toFixed(2)} tks/sec`;
-					},
-					onError: () => {
-						chatMessages.lastChild.remove();
-						addMessage('Connection error (streaming failed).', 'openai');
-					},
+					body: JSON.stringify({ model, messages: conversation, stream: true })
 				});
-			};
+				if (!response.ok) throw new Error('API response error');
+				const reader = response.body.getReader();
+				const decoder = new TextDecoder();
+				let buffer = '', done = false;
+				while (!done) {
+					const { value, done: doneReading } = await reader.read();
+					if (doneReading) break;
+					buffer += decoder.decode(value, { stream: true });
+					const lines = buffer.split('\n');
+					buffer = lines.pop();
+					for (let line of lines) {
+						line = line.trim();
+						if (!line.startsWith('data:')) continue;
+						const jsonStr = line.slice(5).trim();
+						if (jsonStr === '[DONE]') { done = true; break; }
+						try {
+							const parsed = JSON.parse(jsonStr);
+							const delta = parsed.choices[0]?.delta?.content ?? '';
+							if (delta) {
+								lastText += delta;
+								tokenCount++;
+								onChunk?.(lastText, tokenCount, (performance.now() - startTime) / 1000);
+							}
+						} catch { }
+					}
+				}
+				onDone?.(lastText, tokenCount, (performance.now() - startTime) / 1000);
+			} catch (err) {
+				onError?.(err);
+			}
+		};
 
-			chatForm.addEventListener('submit', handleChatSubmit);
+		// ---------- Chat Submission/Streaming ----------
+		restoreHistory();
 
-			// New chat button
-			newChatBtn.addEventListener('click', () => {
-				if (
-					confirm(
-						'Are you sure you want to start a new chat? Current conversation will be deleted.',
-					)
-				) {
-					const newId = generateChatId();
-					window.location.search = `?chat=${newId}`;
+		let messageCounter = 0;
+		/**
+		 * Handle user message submission and OpenAI streaming.
+		 * @param {Event} e
+		 */
+		const handleChatSubmit = e => {
+			e.preventDefault();
+			const text = userInput.value.trim();
+			if (!text) return;
+			addMessage(text, 'user');
+			userInput.value = '';
+
+			const config = load('chatConfig-global') ?? {};
+			const sysPrompt = config.systemPrompt || '';
+			conversation.push({ role: 'user', content: text });
+			saveConversation();
+
+			// Insert system prompt if necessary
+			let convSend = [...conversation];
+			if (sysPrompt && !(convSend.length && convSend[0].role === 'system'))
+				convSend = [{ role: 'system', content: sysPrompt }, ...convSend];
+
+			// Setup streaming message placeholders
+			messageCounter++;
+			const replyId = `reply-${messageCounter}`;
+			const speedId = `speed-${messageCounter}`;
+			addMessage(`<span id="${replyId}"></span><br><small id="${speedId}" class="speed-indicator"></small>`, 'openai');
+			const replyElem = document.getElementById(replyId);
+			const speedElem = document.getElementById(speedId);
+			const msgDiv = chatMessages.lastChild;
+			let lastRendered = 0;
+			const CHUNK_RENDER = 10;
+
+			streamOpenAI({
+				urlBase: urlBaseInput.value.trim(),
+				apiKey: apiKeyInput.value.trim(),
+				model: modelInput.value.trim(),
+				conversation: convSend,
+				onChunk: (content, tokens, secs) => {
+					if (tokens - lastRendered >= CHUNK_RENDER || tokens === 1) {
+						replyElem.innerHTML = renderMarkdown(content);
+						lastRendered = tokens;
+					}
+					if (tokens > 0)
+						speedElem.innerText = `Tokens: ${tokens} • Speed: ${(tokens / (secs || 1)).toFixed(2)} tks/sec`;
+					msgDiv.scrollIntoView({ behavior: 'smooth', block: 'end' });
+				},
+				onDone: (content, tokens, secs) => {
+					if (content) {
+						conversation.push({ role: 'assistant', content });
+						saveConversation();
+					}
+					replyElem.innerHTML = renderMarkdown(content);
+					speedElem.innerText = `Done. Tokens: ${tokens}, Max speed: ${(tokens / (secs || 1)).toFixed(2)} tks/sec`;
+				},
+				onError: () => {
+					chatMessages.lastChild.remove();
+					addMessage('Connection error (streaming failed).', 'openai');
 				}
 			});
+		};
+		chatForm.addEventListener('submit', handleChatSubmit);
 
-			// Notification with fade-out
-			const showAlert = (text, timeout = 1800) => {
-				const div = document.createElement('div');
-				div.className = 'alert alert-success position-fixed shadow fade-out';
-				div.style = `
-        top: 16px;
-        left:50%;
-        transform:translateX(-50%);
-        z-index:1000;
-        min-width:200px;
-        text-align:center;
-      `;
-				div.textContent = text;
-				document.body.appendChild(div);
-				setTimeout(() => div.remove(), timeout);
-			};
-		</script>
-	</body>
+		// ---------- Start New Chat ----------
+		newChatBtn.addEventListener('click', () => {
+			if (confirm('Start a new chat? Current conversation will be deleted.')) {
+				const newId = generateChatId();
+				location.search = `?chat=${newId}`;
+			}
+		});
+
+		// ---------- Notification Alert ----------
+		/**
+		 * Display a temporary fade-out alert notification.
+		 * @param {string} text
+		 * @param {number} timeout (in ms)
+		 */
+		const showAlert = (text, timeout = 1800) => {
+			const div = document.createElement('div');
+			div.className = 'alert alert-success position-fixed shadow fade-out';
+			div.style = `
+        top:16px; left:50%; transform:translateX(-50%);
+        z-index:1000; min-width:200px; text-align:center;`;
+			div.textContent = text;
+			document.body.appendChild(div);
+			setTimeout(() => div.remove(), timeout);
+		};
+	</script>
+</body>
+
 </html>
