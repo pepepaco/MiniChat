@@ -487,12 +487,10 @@
         chatForm.addEventListener('submit', handleChatSubmit);
 
         // ----------- Start new chat -------------
-        newChatBtn.addEventListener('click', async () => {
-            if (confirm('Start a new chat? Current conversation will be deleted.')) {
-                await clearMessages(chatId);
-                const newId = generateChatId();
-                location.search = `?chat=${newId}`;
-            }
+        newChatBtn.addEventListener('click', () => {
+            const newId = generateChatId();
+            // Abre una nueva pestaña/ventana, manteniendo la conversación actual intacta
+            window.open(`?chat=${newId}`, '_blank');
         });
 
         // ----------- Notification alert ----------
