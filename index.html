@@ -205,307 +205,306 @@
         </form>
     </div>
     <script type="module">
-        import {
-            openDB
-        } from 'https://cdn.jsdelivr.net/npm/idb@7/+esm';
+    import {
+        openDB
+    } from 'https://cdn.jsdelivr.net/npm/idb@7/+esm';
 
-        // ----------- IndexedDB helpers -----------
-        const DB_NAME = 'chatdb';
-        const STORE = 'messages';
-        const dbPromise = openDB(DB_NAME, 1, {
-            upgrade(db) {
-                if (!db.objectStoreNames.contains(STORE)) {
-                    db.createObjectStore(STORE, {
-                        keyPath: 'id',
-                        autoIncrement: true
-                    });
-                }
-            }
-        });
-        const saveMessage = async (chatId, msg) => {
-            const db = await dbPromise;
-            await db.add(STORE, {
-                chatId,
-                ...msg
-            });
-        };
-        const getMessages = async (chatId) => {
-            const db = await dbPromise;
-            return (await db.getAll(STORE)).filter(m => m.chatId === chatId);
-        };
-        const clearMessages = async (chatId) => {
-            const db = await dbPromise;
-            const tx = db.transaction(STORE, 'readwrite');
-            const store = tx.objectStore(STORE);
-            const all = await store.getAll();
-            for (const msg of all) {
-                if (msg.chatId === chatId) await store.delete(msg.id);
-            }
-            await tx.done;
-        };
-
-        // ----------- localStorage helpers --------
-        const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
-        const load = key => {
-            try {
-                return JSON.parse(localStorage.getItem(key));
-            } catch {
-                return null;
-            }
-        };
-
-        // ----------- Chat ID management ----------
-        const generateChatId = () => globalThis.crypto?.randomUUID?.() ||
-            Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-        const getOrCreateChatId = () => {
-            const params = new URLSearchParams(location.search);
-            let chatId = params.get('chat');
-            if (!chatId) {
-                chatId = generateChatId();
-                params.set('chat', chatId);
-                history.replaceState(null, '', '?' + params.toString());
-            }
-            return chatId;
-        };
-        const chatId = getOrCreateChatId();
-        document.getElementById('chatIdTag').textContent = chatId;
-
-        // ----------- DOM elements ---------------
-        const settingsPanel = document.getElementById('settingsPanel');
-        const settingsToggle = document.getElementById('settingsToggle');
-        const settingsForm = document.getElementById('settingsForm');
-        const urlBaseInput = document.getElementById('urlBase');
-        const apiKeyInput = document.getElementById('apiKey');
-        const modelInput = document.getElementById('model');
-        const systemPromptInput = document.getElementById('systemPrompt');
-        const chatMessages = document.getElementById('chatMessages');
-        const chatForm = document.getElementById('chatForm');
-        const userInput = document.getElementById('userInput');
-        const newChatBtn = document.getElementById('newChatBtn');
-
-        // ----------- Config management ----------
-        const loadConfig = () => {
-            const config = load('chatConfig-global') ?? {};
-            urlBaseInput.value = config.urlBase ?? 'https://api.openai.com/v1';
-            apiKeyInput.value = config.apiKey ?? '';
-            modelInput.value = config.model ?? 'gpt-3.5-turbo';
-            systemPromptInput.value = config.systemPrompt ?? '';
-        };
-        loadConfig();
-
-        settingsToggle.addEventListener('click', () => {
-            settingsPanel.classList.toggle('show');
-        });
-        settingsForm.addEventListener('submit', e => {
-            e.preventDefault();
-            save('chatConfig-global', {
-                urlBase: urlBaseInput.value.trim(),
-                apiKey: apiKeyInput.value.trim(),
-                model: modelInput.value.trim(),
-                systemPrompt: systemPromptInput.value.trim()
-            });
-            settingsPanel.classList.remove('show');
-            showAlert('Settings saved.');
-        });
-
-        // ----------- Conversation history --------
-        let autosaveEnabled = false;
-        let conversation = [];
-        const saveConversation = async () => {
-            if (!autosaveEnabled) return;
-            const msg = conversation.at(-1);
-            if (msg) await saveMessage(chatId, msg);
-        };
-        const restoreHistory = async () => {
-            autosaveEnabled = false;
-            let history = await getMessages(chatId);
-            chatMessages.innerHTML = '';
-            if (history.length && history.at(-1).role === 'user') history.pop();
-            history = history.filter(msg => !(msg.role === 'assistant' && !msg.content));
-            conversation = history.map(({
-                role,
-                content
-            }) => ({
-                role,
-                content
-            }));
-            conversation.forEach(msg => addMessage(msg.content, msg.role === 'user' ? 'user' : 'openai'));
-            autosaveEnabled = true;
-        };
-
-        // ----------- Markdown & rendering -------
-        const renderMarkdown = text => marked.parse(text);
-        const addMessage = (content, sender) => {
-            const div = document.createElement('div');
-            div.className = `message ${sender}`;
-            div.innerHTML = `<span>${sender === 'openai' ? renderMarkdown(content) : content}</span>`;
-            chatMessages.appendChild(div);
-            div.scrollIntoView({
-                behavior: 'smooth',
-                block: 'end'
-            });
-        };
-
-        // ----------- OpenAI streaming -----------
-        const streamOpenAI = async ({
-            urlBase,
-            apiKey,
-            model,
-            conversation,
-            onChunk,
-            onDone,
-            onError
-        }) => {
-            const startTime = performance.now();
-            let lastText = '';
-            let tokenCount = 0;
-            try {
-                const response = await fetch(`${urlBase}/chat/completions`, {
-                    method: 'POST',
-                    headers: {
-                        Authorization: urlBase.includes('openai.azure.com') ? apiKey : `Bearer ${apiKey}`,
-                        'api-key': urlBase.includes('openai.azure.com') ? apiKey : undefined,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        model,
-                        messages: conversation,
-                        stream: true
-                    })
+    // ----------- IndexedDB helpers -----------
+    const DB_NAME = 'chatdb';
+    const STORE = 'messages';
+    const dbPromise = openDB(DB_NAME, 1, {
+        upgrade(db) {
+            if (!db.objectStoreNames.contains(STORE)) {
+                db.createObjectStore(STORE, {
+                    keyPath: 'id',
+                    autoIncrement: true
                 });
-                if (!response.ok) throw new Error('API response error');
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let buffer = '',
-                    done = false;
-                while (!done) {
-                    const {
-                        value,
-                        done: doneReading
-                    } = await reader.read();
-                    if (doneReading) break;
-                    buffer += decoder.decode(value, {
-                        stream: true
-                    });
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop();
-                    for (let line of lines) {
-                        line = line.trim();
-                        if (!line.startsWith('data:')) continue;
-                        const jsonStr = line.slice(5).trim();
-                        if (jsonStr === '[DONE]') {
-                            done = true;
-                            break;
-                        }
-                        try {
-                            const parsed = JSON.parse(jsonStr);
-                            const delta = parsed.choices[0]?.delta?.content ?? '';
-                            if (delta) {
-                                lastText += delta;
-                                tokenCount++;
-                                onChunk?.(lastText, tokenCount, (performance.now() - startTime) / 1000);
-                            }
-                        } catch { }
-                    }
-                }
-                onDone?.(lastText, tokenCount, (performance.now() - startTime) / 1000);
-            } catch (err) {
-                onError?.(err);
             }
-        };
-
-        // ----------- Chat submission/stream -------
-        await restoreHistory();
-
-        let messageCounter = 0;
-        const handleChatSubmit = async e => {
-            e.preventDefault();
-            const text = userInput.value.trim();
-            if (!text) return;
-            addMessage(text, 'user');
-            userInput.value = '';
-
-            const config = load('chatConfig-global') ?? {};
-            const sysPrompt = config.systemPrompt || '';
-            conversation.push({
-                role: 'user',
-                content: text
-            });
-            await saveConversation();
-
-            let convSend = [...conversation];
-            if (sysPrompt && !(convSend.length && convSend[0].role === 'system'))
-                convSend = [{
-                    role: 'system',
-                    content: sysPrompt
-                }, ...convSend];
-
-            messageCounter++;
-            const replyId = `reply-${messageCounter}`;
-            const speedId = `speed-${messageCounter}`;
-            addMessage(`<span id="${replyId}"></span><br><small id="${speedId}" class="speed-indicator"></small>`, 'openai');
-            const replyElem = document.getElementById(replyId);
-            const speedElem = document.getElementById(speedId);
-            const msgDiv = chatMessages.lastChild;
-            let lastRendered = 0;
-            const CHUNK_RENDER = 10;
-
-            await streamOpenAI({
-                urlBase: urlBaseInput.value.trim(),
-                apiKey: apiKeyInput.value.trim(),
-                model: modelInput.value.trim(),
-                conversation: convSend,
-                onChunk: (content, tokens, secs) => {
-                    if (tokens - lastRendered >= CHUNK_RENDER || tokens === 1) {
-                        replyElem.innerHTML = renderMarkdown(content);
-                        lastRendered = tokens;
-                    }
-                    if (tokens > 0)
-                        speedElem.innerText = `Tokens: ${tokens} • Speed: ${(tokens / (secs || 1)).toFixed(2)} tks/sec`;
-                    msgDiv.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'end'
-                    });
-                },
-                onDone: async (content, tokens, secs) => {
-                    if (content) {
-                        conversation.push({
-                            role: 'assistant',
-                            content
-                        });
-                        await saveConversation();
-                    }
-                    replyElem.innerHTML = renderMarkdown(content);
-                    speedElem.innerText = `Done. Tokens: ${tokens}, Max speed: ${(tokens / (secs || 1)).toFixed(2)} tks/sec`;
-                },
-                onError: () => {
-                    chatMessages.lastChild.remove();
-                    addMessage('Connection error (streaming failed).', 'openai');
-                }
-            });
-        };
-        chatForm.addEventListener('submit', handleChatSubmit);
-
-        // ----------- Start new chat -------------
-        newChatBtn.addEventListener('click', () => {
-            const newId = generateChatId();
-            // Abre una nueva pestaña/ventana, manteniendo la conversación actual intacta
-            window.open(`?chat=${newId}`, '_blank');
+        }
+    });
+    const saveMessage = async (chatId, msg) => {
+        const db = await dbPromise;
+        await db.add(STORE, {
+            chatId,
+            ...msg
         });
+    };
+    const getMessages = async(chatId) => {
+        const db = await dbPromise;
+        return (await db.getAll(STORE)).filter(m => m.chatId === chatId);
+    };
+    const clearMessages = async(chatId) => {
+        const db = await dbPromise;
+        const tx = db.transaction(STORE, 'readwrite');
+        const store = tx.objectStore(STORE);
+        const all = await store.getAll();
+        for (const msg of all) {
+            if (msg.chatId === chatId) await store.delete(msg.id);
+        }
+        await tx.done;
+    };
 
-        // ----------- Notification alert ----------
-        const showAlert = (text, timeout = 1800) => {
-            const div = document.createElement('div');
-            div.className = 'alert alert-success position-fixed shadow fade-out';
-            div.style = `
+    // ----------- localStorage helpers --------
+    const save = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+    const load = key => {
+        try {
+            return JSON.parse(localStorage.getItem(key));
+        } catch {
+            return null;
+        }
+    };
+
+    // ----------- Chat ID management ----------
+    const generateChatId = () => globalThis.crypto?.randomUUID?.() ||
+        Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const getOrCreateChatId = () => {
+        const params = new URLSearchParams(location.search);
+        let chatId = params.get('chat');
+        if (!chatId) {
+            chatId = generateChatId();
+            params.set('chat', chatId);
+            history.replaceState(null, '', '?' + params.toString());
+        }
+        return chatId;
+    };
+    const chatId = getOrCreateChatId();
+    document.getElementById('chatIdTag').textContent = chatId;
+
+    // ----------- DOM elements ---------------
+    const settingsPanel = document.getElementById('settingsPanel');
+    const settingsToggle = document.getElementById('settingsToggle');
+    const settingsForm = document.getElementById('settingsForm');
+    const urlBaseInput = document.getElementById('urlBase');
+    const apiKeyInput = document.getElementById('apiKey');
+    const modelInput = document.getElementById('model');
+    const systemPromptInput = document.getElementById('systemPrompt');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatForm = document.getElementById('chatForm');
+    const userInput = document.getElementById('userInput');
+    const newChatBtn = document.getElementById('newChatBtn');
+
+    // ----------- Config management ----------
+    const configKey = `chatConfig-${chatId}`;
+
+    // Cargar configuración del chat actual, o valores por defecto
+    const loadConfig = () => {
+        const config = load(configKey) ?? {};
+        urlBaseInput.value = config.urlBase ?? 'https://api.openai.com/v1';
+        apiKeyInput.value = config.apiKey ?? '';
+        modelInput.value = config.model ?? 'gpt-3.5-turbo';
+        systemPromptInput.value = config.systemPrompt ?? '';
+    };
+    loadConfig();
+
+    settingsToggle.addEventListener('click', () => {
+        settingsPanel.classList.toggle('show');
+    });
+
+    settingsForm.addEventListener('submit', e => {
+        e.preventDefault();
+        save(configKey, {
+            urlBase: urlBaseInput.value.trim(),
+            apiKey: apiKeyInput.value.trim(),
+            model: modelInput.value.trim(),
+            systemPrompt: systemPromptInput.value.trim()
+        });
+        settingsPanel.classList.remove('show');
+        showAlert('Settings saved.');
+    });
+
+    // ----------- Conversation history --------
+    let autosaveEnabled = false;
+    let conversation = [];
+    const saveConversation = async () => {
+        if (!autosaveEnabled) return;
+        const msg = conversation.at(-1);
+        if (msg) await saveMessage(chatId, msg);
+    };
+    const restoreHistory = async () => {
+        autosaveEnabled = false;
+        let history = await getMessages(chatId);
+        chatMessages.innerHTML = '';
+        if (history.length && history.at(-1).role === 'user') history.pop();
+        history = history.filter(msg => !(msg.role === 'assistant' && !msg.content));
+        conversation = history.map(({ role, content }) => ({ role, content }));
+        conversation.forEach(msg => addMessage(msg.content, msg.role === 'user' ? 'user' : 'openai'));
+        autosaveEnabled = true;
+    };
+
+    // ----------- Markdown & rendering -------
+    const renderMarkdown = text => marked.parse(text);
+    const addMessage = (content, sender) => {
+        const div = document.createElement('div');
+        div.className = `message ${sender}`;
+        div.innerHTML = `<span>${sender === 'openai' ? renderMarkdown(content) : content}</span>`;
+        chatMessages.appendChild(div);
+        div.scrollIntoView({
+            behavior: 'smooth',
+            block: 'end'
+        });
+    };
+
+    // ----------- OpenAI streaming -----------
+    const streamOpenAI = async ({
+        urlBase,
+        apiKey,
+        model,
+        conversation,
+        onChunk,
+        onDone,
+        onError
+    }) => {
+        const startTime = performance.now();
+        let lastText = '';
+        let tokenCount = 0;
+        try {
+            const response = await fetch(`${urlBase}/chat/completions`, {
+                method: 'POST',
+                headers: {
+                    Authorization: urlBase.includes('openai.azure.com') ? apiKey : `Bearer ${apiKey}`,
+                    'api-key': urlBase.includes('openai.azure.com') ? apiKey : undefined,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    model,
+                    messages: conversation,
+                    stream: true
+                })
+            });
+            if (!response.ok) throw new Error('API response error');
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '', done = false;
+            while (!done) {
+                const { value, done: doneReading } = await reader.read();
+                if (doneReading) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (let line of lines) {
+                    line = line.trim();
+                    if (!line.startsWith('data:')) continue;
+                    const jsonStr = line.slice(5).trim();
+                    if (jsonStr === '[DONE]') {
+                        done = true;
+                        break;
+                    }
+                    try {
+                        const parsed = JSON.parse(jsonStr);
+                        const delta = parsed.choices[0]?.delta?.content ?? '';
+                        if (delta) {
+                            lastText += delta;
+                            tokenCount++;
+                            onChunk?.(lastText, tokenCount, (performance.now() - startTime) / 1000);
+                        }
+                    } catch {}
+                }
+            }
+            onDone?.(lastText, tokenCount, (performance.now() - startTime) / 1000);
+        } catch (err) {
+            onError?.(err);
+        }
+    };
+
+    // ----------- Chat submission/stream -------
+    await restoreHistory();
+
+    let messageCounter = 0;
+    const handleChatSubmit = async e => {
+        e.preventDefault();
+        const text = userInput.value.trim();
+        if (!text) return;
+        addMessage(text, 'user');
+        userInput.value = '';
+
+        // Usar configuración solo del chat actual
+        const config = load(configKey) ?? {};
+        const sysPrompt = config.systemPrompt || '';
+        conversation.push({
+            role: 'user',
+            content: text
+        });
+        await saveConversation();
+
+        let convSend = [...conversation];
+        if (sysPrompt && !(convSend.length && convSend[0].role === 'system'))
+            convSend = [{
+                role: 'system',
+                content: sysPrompt
+            }, ...convSend];
+
+        messageCounter++;
+        const replyId = `reply-${messageCounter}`;
+        const speedId = `speed-${messageCounter}`;
+        addMessage(`<span id="${replyId}"></span><br><small id="${speedId}" class="speed-indicator"></small>`, 'openai');
+        const replyElem = document.getElementById(replyId);
+        const speedElem = document.getElementById(speedId);
+        const msgDiv = chatMessages.lastChild;
+        let lastRendered = 0;
+        const CHUNK_RENDER = 10;
+
+        await streamOpenAI({
+            urlBase: config.urlBase ?? 'https://api.openai.com/v1',
+            apiKey: config.apiKey ?? '',
+            model: config.model ?? 'gpt-3.5-turbo',
+            conversation: convSend,
+            onChunk: (content, tokens, secs) => {
+                if (tokens - lastRendered >= CHUNK_RENDER || tokens === 1) {
+                    replyElem.innerHTML = renderMarkdown(content);
+                    lastRendered = tokens;
+                }
+                if (tokens > 0)
+                    speedElem.innerText = `Tokens: ${tokens} • Speed: ${(tokens / (secs || 1)).toFixed(2)} tks/sec`;
+                msgDiv.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'end'
+                });
+            },
+            onDone: async (content, tokens, secs) => {
+                if (content) {
+                    conversation.push({
+                        role: 'assistant',
+                        content
+                    });
+                    await saveConversation();
+                }
+                replyElem.innerHTML = renderMarkdown(content);
+                speedElem.innerText = `Done. Tokens: ${tokens}, Max speed: ${(tokens / (secs || 1)).toFixed(2)} tks/sec`;
+            },
+            onError: () => {
+                chatMessages.lastChild.remove();
+                addMessage('Connection error (streaming failed).', 'openai');
+            }
+        });
+    };
+    chatForm.addEventListener('submit', handleChatSubmit);
+
+    // ----------- Start new chat -------------
+    newChatBtn.addEventListener('click', () => {
+        const newId = generateChatId();
+        const thisConfig = {
+            urlBase: urlBaseInput.value.trim(),
+            apiKey: apiKeyInput.value.trim(),
+            model: modelInput.value.trim(),
+            systemPrompt: systemPromptInput.value.trim()
+        };
+        save(`chatConfig-${newId}`, thisConfig);
+        window.open(`?chat=${newId}`, '_blank');
+    });
+
+    // ----------- Notification alert ----------
+    const showAlert = (text, timeout = 1800) => {
+        const div = document.createElement('div');
+        div.className = 'alert alert-success position-fixed shadow fade-out';
+        div.style = `
         top:16px; left:50%; transform:translateX(-50%);
         z-index:1000; min-width:200px; text-align:center;
     `;
-            div.textContent = text;
-            document.body.appendChild(div);
-            setTimeout(() => div.remove(), timeout);
-        };
-    </script>
+        div.textContent = text;
+        document.body.appendChild(div);
+        setTimeout(() => div.remove(), timeout);
+    };
+</script>
 </body>
 
 </html>
