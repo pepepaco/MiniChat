@@ -101,7 +101,7 @@ function getState(req) {
     return state;
 }
 
-function renderPage(state) {
+function renderPage(state, req = null) {
 	const { config, messages, chatId } = state;
 	const encryptedState = encrypt(JSON.stringify(state));
 	const showConfig = state.showConfig;
@@ -113,12 +113,15 @@ function renderPage(state) {
 		state.speedInfo = null;
 	}
 
+	// Determine the base URL dynamically from the request or default to current host
+	const baseUrl = req ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3000/';
+
 	return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<base href="http://localhost:3000/">
+<base href="${baseUrl}">
 <title>${state.title} - OpenAI Chat</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
