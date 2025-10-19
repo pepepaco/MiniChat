@@ -101,7 +101,7 @@ function getState(req) {
     return state;
 }
 
-function renderPage(state, req = null) {
+function renderPage(state, req = null, isDownload = false) {
 	const { config, messages, chatId } = state;
 	const encryptedState = encrypt(JSON.stringify(state));
 	const showConfig = state.showConfig;
@@ -113,15 +113,15 @@ function renderPage(state, req = null) {
 		state.speedInfo = null;
 	}
 
-	// Determine the base URL dynamically from the request or default to current host
-	const baseUrl = req ? `${req.protocol}://${req.get('host')}` : 'http://localhost:3000/';
+	// Include base href only when downloading/saving chats
+	const baseUrl = isDownload && req ? `<base href="${req.protocol}://${req.get('host')}">` : '';
 
 	return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<base href="${baseUrl}">
+${baseUrl}
 <title>${state.title} - OpenAI Chat</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -292,7 +292,7 @@ app.post('/', async (req, res) => {
 			break;
 
 		case 'downloadChat':
-			const htmlContent = renderPage(state);
+			const htmlContent = renderPage(state, req, true); // Pass req and set isDownload to true
 			res.setHeader(
 				'Content-Disposition',
 				`attachment; filename="${state.title
