@@ -1,9 +1,14 @@
 const express = require('express');
-const marked = require('marked');
 const crypto = require('crypto');
 const app = express();
 
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+
+// Dynamically import marked to handle ESM compatibility
+let marked;
+(async () => {
+  marked = await import('marked');
+})();
 
 const DEFAULT_CONFIG = {
 	urlBase: 'https://api.openai.com/v1',
