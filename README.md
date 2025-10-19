@@ -7,6 +7,8 @@
 
 Both are proof-of-concept implementations designed for testing and experimentation.
 
+[![Deploy to Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/pepepaco/MiniChat)
+
 ## Features Common to Both
 
 - **Full Markdown Support:** Assistant replies are rendered with proper Markdown formatting, including tables, lists, headings, and code blocks.
@@ -18,6 +20,9 @@ Both are proof-of-concept implementations designed for testing and experimentati
 ## Implementation 1: index.html (Zero Backend)
 
 **index.html** is a client-side only implementation that runs entirely in the browser with no backend required.
+
+**Try it live:**  
+[https://pepepaco.github.io/MiniChat/](https://pepepaco.github.io/MiniChat/)
 
 **Usage:**
 1. **Open the `index.html` file directly in your browser.**
