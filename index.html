@@ -368,9 +368,9 @@
                 const lines = buffer.split('\n');
                 buffer = lines.pop();
                 for (let line of lines) {
-                    line = line.trim();
-                    if (!line.startsWith('data:')) continue;
-                    const jsonStr = line.slice(5).trim();
+                    const ltrim = line.trim();
+                    if (!ltrim.startsWith('data:')) continue;
+                    const jsonStr = ltrim.slice(5).trim();
                     if (jsonStr === '[DONE]') {
                         done = true;
                         break;
@@ -426,8 +426,6 @@
         const replyElem = document.getElementById(replyId);
         const speedElem = document.getElementById(speedId);
         const msgDiv = chatMessages.lastChild;
-        let lastRendered = 0;
-        const CHUNK_RENDER = 10;
 
         await streamOpenAI({
             urlBase: config.urlBase ?? 'https://api.openai.com/v1',
@@ -435,9 +433,8 @@
             model: config.model ?? 'gpt-3.5-turbo',
             conversation: convSend,
             onChunk: (content, tokens, secs) => {
-                if (tokens - lastRendered >= CHUNK_RENDER || tokens === 1) {
+                if (tokens % 10 === 0 || tokens === 1) {
                     replyElem.innerHTML = renderMarkdown(content);
-                    lastRendered = tokens;
                 }
                 if (tokens > 0)
                     speedElem.innerText = `Tokens: ${tokens} • Speed: ${(tokens / (secs || 1)).toFixed(2)} tks/sec`;
