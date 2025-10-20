@@ -383,5 +383,5 @@ app.post('/newchat', (req, res) => {
 	};
 	res.send(renderPage(state));
 });
-
-app.listen(3000, () => console.log('Chat en http://localhost:3000'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Chat en http://localhost:${PORT}`));
