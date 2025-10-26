@@ -7,7 +7,7 @@ app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 // Dynamically import marked to handle ESM compatibility
 let marked;
 (async () => {
-  marked = await import('marked');
+	marked = await import('marked');
 })();
 
 const DEFAULT_CONFIG = {
@@ -59,46 +59,47 @@ const ENCRYPTION_KEY = crypto.scryptSync(
 const IV_LENGTH = 16;
 
 function encrypt(text) {
-    const iv = crypto.randomBytes(IV_LENGTH);
-    const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-    let encrypted = cipher.update(text);
-    encrypted = Buffer.concat([encrypted, cipher.final()]);
-    return iv.toString('hex') + ':' + encrypted.toString('hex');
+	const iv = crypto.randomBytes(IV_LENGTH);
+	const cipher = crypto.createCipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+	let encrypted = cipher.update(text);
+	encrypted = Buffer.concat([encrypted, cipher.final()]);
+	return iv.toString('hex') + ':' + encrypted.toString('hex');
 }
 
 function decrypt(text) {
-    try {
-        const textParts = text.split(':');
-        const iv = Buffer.from(textParts.shift(), 'hex');
-        const encryptedText = Buffer.from(textParts.join(':'), 'hex');
-        const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-        let decrypted = decipher.update(encryptedText);
-        decrypted = Buffer.concat([decrypted, decipher.final()]);
-        return decrypted.toString();
-    } catch (error) {
-        return null;
-    }
+	try {
+		const textParts = text.split(':');
+		const iv = Buffer.from(textParts.shift(), 'hex');
+		const encryptedText = Buffer.from(textParts.join(':'), 'hex');
+		const decipher = crypto.createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
+		let decrypted = decipher.update(encryptedText);
+		decrypted = Buffer.concat([decrypted, decipher.final()]);
+		return decrypted.toString();
+	} catch (error) {
+		return null;
+	}
 }
 
 function getState(req) {
-    let state = {};
-    const viewstate = (req.body && req.body.__VIEWSTATE) || (req.query && req.query.__VIEWSTATE);
+	let state = {};
+	const viewstate =
+		(req.body && req.body.__VIEWSTATE) || (req.query && req.query.__VIEWSTATE);
 
-    if (viewstate) {
-        const decrypted = decrypt(viewstate);
-        if (decrypted) {
-            try {
-                state = JSON.parse(decrypted);
-            } catch (e) {}
-        }
-    }
-    
-    if (!state.config) state.config = { ...DEFAULT_CONFIG };
-    if (!state.messages) state.messages = [];
+	if (viewstate) {
+		const decrypted = decrypt(viewstate);
+		if (decrypted) {
+			try {
+				state = JSON.parse(decrypted);
+			} catch (e) {}
+		}
+	}
+
+	if (!state.config) state.config = { ...DEFAULT_CONFIG };
+	if (!state.messages) state.messages = [];
 	if (!state.chatId) state.chatId = Date.now().toString(36);
-    if (!state.title) state.title = 'New Chat';
+	if (!state.title) state.title = 'New Chat';
 
-    return state;
+	return state;
 }
 
 function renderPage(state, req = null, isDownload = false) {
@@ -114,7 +115,10 @@ function renderPage(state, req = null, isDownload = false) {
 	}
 
 	// Include base href only when downloading/saving chats
-	const baseUrl = isDownload && req ? `<base href="${req.protocol}://${req.get('host')}">` : '';
+	const baseUrl =
+		isDownload && req
+			? `<base href="${req.protocol}://${req.get('host')}">`
+			: '';
 
 	return `
 <!DOCTYPE html>
@@ -153,23 +157,23 @@ ${baseUrl}
           <label class="form-label">Base URL (up to /v1)</label>
           <input type="text" class="form-control" name="urlBase" value="${
 						config.urlBase
-					}" />
+					}" autocomplete="on"/>
         </div>
         <div class="mb-2">
           <label class="form-label">API Key</label>
           <input type="text" class="form-control" name="apiKey" value="${
 						config.apiKey
-					}" />
+					}" autocomplete="on"/>
         </div>
         <div class="mb-2">
           <label class="form-label">Model</label>
           <input type="text" class="form-control" name="model" value="${
 						config.model
-					}" />
+					}" autocomplete="on"/>
         </div>
         <div class="mb-2">
           <label class="form-label">System prompt</label>
-          <textarea class="form-control" name="systemPrompt" rows="2">${
+          <textarea class="form-control" name="systemPrompt" rows="2" autocomplete="on">${
 						config.systemPrompt || ''
 					}</textarea>
           <small class="text-secondary">Controls AI behavior.</small>
