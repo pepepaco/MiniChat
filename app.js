@@ -70,21 +70,6 @@ code,pre {
   transform: scale(0.96);
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
-
-/* Restore the chat window behavior */
-body {
-  height: 100vh;
-  overflow: hidden;
-}
-.chat-window {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
-.chat-messages-container {
-  flex: 1;
-  overflow-y: auto;
-}
 `;
 
 const ALGORITHM = 'aes-256-cbc';
@@ -168,11 +153,11 @@ ${baseUrl}
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>${CSS}</style>
 </head>
-<body class="d-flex flex-column">
+<body class="d-flex flex-column" style="height: 100vh; overflow: hidden;">
 <form action="/" method="post">
 <input type="hidden" name="__VIEWSTATE" value="${encryptedState}" />
 <button type="submit" name="action" value="sendMessage" style="display: none;" aria-hidden="true"></button>
-<div class="chat-window">
+<div class="d-flex flex-column" style="height: 100vh; display: flex; flex-direction: column;">
   <header class="p-3 border-bottom d-flex align-items-center justify-content-between">
     <span class="fw-bold">
       ${state.title} <small class="text-secondary">VIEWSTATE (Encrypted)</small>
@@ -221,12 +206,13 @@ ${baseUrl}
 			: ''
 	}
 
-    <div class="chat-messages-container">
+    <div class="d-flex flex-column" style="flex: 1; overflow-y: auto;">
       <main class="p-3 bg-white" id="chatMessages">
         ${messages
 					.map((msg, i) => {
 						if (msg.role === 'user') {
-							const idAttr = i === lastUserMsgIndex ? ' id="last-user-msg"' : '';
+							const idAttr =
+								i === lastUserMsgIndex ? ' id="last-user-msg"' : '';
 							return `<div class="message user text-end"${idAttr}><span>${msg.content}</span></div>`;
 						} else {
 							return `<div class="message openai text-start"><span>${marked.parse(
