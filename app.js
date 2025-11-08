@@ -18,27 +18,49 @@ const DEFAULT_CONFIG = {
 };
 
 const CSS = `
-html,body{height:100%;width:100vw;margin:0;padding:0;}
-body{background:#f8f9fa;min-height:100vh;width:100vw;}
-.chat-window{width:100vw;height:100vh;display:flex;flex-direction:column;background:#fff;}
-.chat-messages{flex:1;overflow-y:auto;padding:16px;border-bottom:1px solid #eee;background:#fff;}
-.message.user{text-align:right;}
-.message.openai{text-align:left;}
-.message span{display:inline-block;padding:8px 12px;border-radius:16px;margin:6px 0;max-width:80%;word-break:break-word;}
-.message.user span{background:#0d6efd;color:#fff;}
-.message.openai span{background:#e9ecef;color:#333;}
-.settings-panel{border-bottom:1px solid #eee;padding:16px;background:#f7f7f7;}
-.new-chat-btn{margin-right:10px;background:#198754;color:#fff;border:none;padding:5px 16px;border-radius:20px;font-size:1em;cursor:pointer;}
-.new-chat-btn:hover{background:#157347;}
-.chat-id-tag{font-size:.75em;color:#888;font-family:monospace;background:#eee;padding:1px 7px;border-radius:12px;margin-left:8px;}
-.speed-indicator{font-size: .85em; color: #888; padding-left: 1em;}
-@media(max-width:600px){
-  .chat-window{width:100vw;height:100vh;border-radius:0;margin:0;}
-  .chat-messages{padding:8px;}
-  .settings-panel,.p-3{padding:8px !important;}
-  .message span{max-width:100%;font-size:1em;}
+/* Essential chat bubble styles - these don't have direct Bootstrap equivalents */
+.message span {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 16px;
+  margin: 6px 0;
+  max-width: 80%;
+  word-break: break-word;
 }
-code,pre{font-family:'Fira Mono','Consolas',monospace;background:#f1f3f5;border-radius:4px;padding:2px 6px;}
+.message.user span {
+  background: #0d6efd;
+  color: #fff;
+}
+.message.openai span {
+  background: #e9ecef;
+  color: #333;
+}
+.chat-id-tag {
+  font-size: .75em;
+  color: #888;
+  font-family: monospace;
+  background: #eee;
+  padding: 1px 7px;
+  border-radius: 12px;
+  margin-left: 8px;
+}
+.speed-indicator {
+  font-size: .85em;
+  color: #888;
+  padding-left: 1em;
+}
+@media (max-width: 600px) {
+  .message span {
+    max-width: 100%;
+    font-size: 1em;
+  }
+}
+code,pre {
+  font-family: 'Fira Mono', 'Consolas', monospace;
+  background: #f1f3f5;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
 .btn {
   transition: background-color 0.2s, transform 0.1s;
 }
@@ -47,6 +69,21 @@ code,pre{font-family:'Fira Mono','Consolas',monospace;background:#f1f3f5;border-
   color: #fff;
   transform: scale(0.96);
   box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+
+/* Restore the chat window behavior */
+body {
+  height: 100vh;
+  overflow: hidden;
+}
+.chat-window {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.chat-messages-container {
+  flex: 1;
+  overflow-y: auto;
 }
 `;
 
@@ -131,7 +168,7 @@ ${baseUrl}
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>${CSS}</style>
 </head>
-<body>
+<body class="d-flex flex-column">
 <form action="/" method="post">
 <input type="hidden" name="__VIEWSTATE" value="${encryptedState}" />
 <button type="submit" name="action" value="sendMessage" style="display: none;" aria-hidden="true"></button>
@@ -142,17 +179,17 @@ ${baseUrl}
       <span class="chat-id-tag" title="Conversation ID">${chatId}</span>
     </span>
     <div class="d-flex align-items-center gap-2">
-      <button class="btn btn-secondary btn-sm" type="submit" name="action" value="downloadChat" title="Save Chat">Save</button>
-      <button class="btn btn-info btn-sm" type="submit" name="action" value="refreshTitle" title="Generate Title">Refresh Title</button>
+      <button class="btn btn-outline-secondary btn-sm" type="submit" name="action" value="downloadChat" title="Save Chat">Save</button>
+      <button class="btn btn-outline-primary btn-sm" type="submit" name="action" value="refreshTitle" title="Generate Title">Refresh Title</button>
+      <button class="btn btn-outline-success btn-sm" type="submit" name="action" value="newChat" formaction="/newchat" formtarget="_blank" title="New Chat">New chat</button>
       <button class="settings-toggle btn btn-link p-0" type="submit" name="action" value="toggleConfig" style="font-size:1.35em;line-height:1;vertical-align:middle;color:#0d6efd" title="Configuración">&#9881;</button>
-      <button class="new-chat-btn" type="submit" name="action" value="newChat" formaction="/newchat" formtarget="_blank" title="New Chat">New chat</button>
     </div>
   </header>
 
   ${
 		showConfig
 			? `
-    <section class="settings-panel mt-2 mb-3">
+    <section class="bg-light border-bottom" style="display: block; padding: 16px;">
       <div class="mb-2">
           <label class="form-label">Base URL (up to /v1)</label>
           <input type="text" class="form-control" name="urlBase" value="${
@@ -184,26 +221,28 @@ ${baseUrl}
 			: ''
 	}
 
-    <main class="chat-messages" id="chatMessages">
-      ${messages
-				.map((msg, i) => {
-					if (msg.role === 'user') {
-						const idAttr = i === lastUserMsgIndex ? ' id="last-user-msg"' : '';
-						return `<div class="message user"${idAttr}><span>${msg.content}</span></div>`;
-					} else {
-						return `<div class="message openai"><span>${marked.parse(
-							msg.content,
-						)}${
-							i === messages.length - 1 ? speedIndicatorHtml : ''
-						}</span></div>`;
-					}
-				})
-				.join('\n')}
-      <div class="d-flex p-3 gap-2">
+    <div class="chat-messages-container">
+      <main class="p-3 bg-white" id="chatMessages">
+        ${messages
+					.map((msg, i) => {
+						if (msg.role === 'user') {
+							const idAttr = i === lastUserMsgIndex ? ' id="last-user-msg"' : '';
+							return `<div class="message user text-end"${idAttr}><span>${msg.content}</span></div>`;
+						} else {
+							return `<div class="message openai text-start"><span>${marked.parse(
+								msg.content,
+							)}${
+								i === messages.length - 1 ? speedIndicatorHtml : ''
+							}</span></div>`;
+						}
+					})
+					.join('\n')}
+      </main>
+      <div class="d-flex p-3 gap-2 bg-white border-top">
         <input type="text" class="form-control flex-grow-1" name="userInput" placeholder="Type your message..." autofocus autocomplete="off"/>
         <button class="btn btn-primary flex-shrink-0" type="submit" name="action" value="sendMessage">Send</button>
       </div>
-    </main>
+    </div>
 </div>
 </form>
 </body>
