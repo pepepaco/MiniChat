@@ -120,7 +120,7 @@ function renderPage(state, req = null, isDownload = false) {
 		state;
 	const encrypted = encrypt(JSON.stringify(state));
 	const meta = waiting
-		? `<meta http-equiv="refresh" content="0.2;url=/?chatId=${encodeURIComponent(
+		? `<meta http-equiv="refresh" content="0.1;url=/?chatId=${encodeURIComponent(
 				chatId,
 		  )}">`
 		: '';
@@ -233,20 +233,52 @@ function escapeHtml(s = '') {
 	);
 }
 
-// ---------- OpenAI call ----------
-async function callOpenAI(state, messages) {
+// ---------- OpenAI call con streaming ----------
+async function callOpenAIStream(state, messages, onChunk) {
 	const url = `${state.config.urlBase}/chat/completions`;
 	const res = await fetcher(url, {
 		method: 'POST',
 		headers: getAuthHeaders(state.config),
-		body: JSON.stringify({
-			model: state.config.model,
-			messages,
-			stream: false,
-		}),
+		body: JSON.stringify({ model: state.config.model, messages, stream: true }),
 	});
+
 	if (!res.ok) return { ok: false, status: res.status, text: await res.text() };
-	return { ok: true, data: await res.json() };
+
+	let fullContent = '';
+	let buffer = '';
+
+	// Usar TextDecoder para manejar el stream
+	const decoder = new TextDecoder();
+
+	for await (const chunk of res.body) {
+		buffer += decoder.decode(chunk, { stream: true });
+		const lines = buffer.split('\n');
+
+		// Mantener la última línea incompleta en el buffer
+		buffer = lines.pop() || '';
+
+		for (const line of lines) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed === 'data: [DONE]') continue;
+
+			if (trimmed.startsWith('data: ')) {
+				try {
+					const jsonStr = trimmed.slice(6);
+					const parsed = JSON.parse(jsonStr);
+					const content = parsed.choices?.[0]?.delta?.content;
+
+					if (content) {
+						fullContent += content;
+						if (onChunk) await onChunk(fullContent);
+					}
+				} catch (e) {
+					// Ignorar errores de parsing de líneas individuales
+				}
+			}
+		}
+	}
+
+	return { ok: true, content: fullContent || 'No response received' };
 }
 
 // ---------- Rutas ----------
@@ -287,7 +319,7 @@ app.post('/', async (req, res) => {
 			// Send interim page (with waiting meta-refresh and processing indicator)
 			res.send(renderPage(state));
 
-			// Background generation (no client JS required)
+			// Background generation con streaming
 			(async () => {
 				// Crear conversación sin el mensaje de procesamiento
 				const conv = state.messages.filter(m => m.content !== '__PROCESSING__');
@@ -296,19 +328,41 @@ app.post('/', async (req, res) => {
 					conv.unshift({ role: 'system', content: state.config.systemPrompt });
 				}
 
-				let reply;
+				let reply = '';
+				const startTime = Date.now();
+
 				try {
-					const r = await callOpenAI(state, conv);
-					reply = r.ok
-						? r.data.choices?.[0]?.message?.content ?? 'No response'
-						: `Error ${r.status}: ${r.text}`;
+					const r = await callOpenAIStream(state, conv, async content => {
+						// Actualizar el mensaje de procesamiento con el contenido parcial
+						const processingIdx = state.messages.findIndex(
+							m =>
+								m.content === '__PROCESSING__' ||
+								(m.role === 'assistant' &&
+									m === state.messages[state.messages.length - 1]),
+						);
+						if (processingIdx !== -1) {
+							state.messages[processingIdx] = { role: 'assistant', content };
+						}
+						// Guardar estado actualizado
+						global.__readyStates[state.chatId] = encrypt(JSON.stringify(state));
+					});
+
+					if (!r.ok) {
+						reply = `Error ${r.status}: ${r.text}`;
+					} else {
+						reply = r.content;
+					}
 				} catch (e) {
 					reply = 'Error: ' + e.message;
+					console.error('Streaming error:', e);
 				}
 
-				// Reemplazar el mensaje de procesamiento con la respuesta real
+				// Actualizar con respuesta final
 				const processingIdx = state.messages.findIndex(
-					m => m.content === '__PROCESSING__',
+					m =>
+						m.content === '__PROCESSING__' ||
+						(m.role === 'assistant' &&
+							m === state.messages[state.messages.length - 1]),
 				);
 				if (processingIdx !== -1) {
 					state.messages[processingIdx] = { role: 'assistant', content: reply };
@@ -316,7 +370,8 @@ app.post('/', async (req, res) => {
 					state.messages.push({ role: 'assistant', content: reply });
 				}
 
-				state.speedInfo = `Done. Tokens: ${reply.length}`;
+				const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+				state.speedInfo = `Done in ${elapsed}s. Chars: ${reply.length}`;
 				state.waiting = false;
 
 				// Save final
@@ -354,7 +409,7 @@ app.post('/', async (req, res) => {
 					const cleanMsgs = state.messages.filter(
 						m => m.content !== '__PROCESSING__',
 					);
-					const r = await callOpenAI(state, [
+					const r = await callOpenAIStream(state, [
 						...cleanMsgs,
 						{
 							role: 'user',
@@ -363,7 +418,7 @@ app.post('/', async (req, res) => {
 						},
 					]);
 					state.title = r.ok
-						? (r.data.choices?.[0]?.message?.content || 'New Chat')
+						? (r.content || 'New Chat')
 								.trim()
 								.replace(/[^a-zA-Z0-9 ]/g, '')
 								.substring(0, 50)
