@@ -1,4 +1,9 @@
-﻿# Intelligent PowerShell - OpenAI Chat Client
+﻿param(
+    [switch]$Install,
+    [string]$Key
+)
+
+# Intelligent PowerShell - OpenAI Chat Client
 # Conversational system that converts natural language into PowerShell commands
 
 #Requires -Version 5.1
@@ -28,6 +33,9 @@ $Colors = @{
     AI = "Blue"
 }
 
+# Store install flag for later use
+$script:Install = $Install.IsPresent
+
 # ============================
 # UTILITY FUNCTIONS
 # ============================
@@ -52,34 +60,70 @@ function Show-Banner {
 }
 
 function Test-Configuration {
-    Write-ColorOutput "Verifying configuration..." $Colors.Info
+    Write-ColorOutput "Verifying configuration (happy path)..." $Colors.Info
 
-    # Verify API Key
-    $apiKey = $env:OPENAI_API_KEY
-    if ([string]::IsNullOrWhiteSpace($apiKey)) {
-        Write-ColorOutput "ERROR: OPENAI_API_KEY environment variable not found." $Colors.Error
-        Write-ColorOutput "Please configure your OpenAI API key:" $Colors.Warning
-        Write-ColorOutput '  $env:OPENAI_API_KEY = "your-api-key-here"' $Colors.Info
+    try {
+        # Priority: Key > existing environment var > stored B64
+        if ($Key) {
+            $env:OPENAI_API_KEY = $Key
+            Write-ColorOutput "✓ Loaded API key from -Key." $Colors.Success
+        } elseif (-not $env:OPENAI_API_KEY -and $env:OPENAI_API_KEY_B64) {
+            $env:OPENAI_API_KEY = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($env:OPENAI_API_KEY_B64))
+            Write-ColorOutput "✓ Loaded API key from stored OPENAI_API_KEY_B64." $Colors.Success
+        }
+
+        if (-not $env:OPENAI_API_KEY) {
+            throw "OPENAI_API_KEY not available."
+        }
+
+        $script:PSVersion = "{0}.{1}" -f $PSVersionTable.PSVersion.Major, $PSVersionTable.PSVersion.Minor
+        $script:ApiEndpoint = if (-not [string]::IsNullOrWhiteSpace($env:OPENAI_API_ENDPOINT)) { $env:OPENAI_API_ENDPOINT } else { "https://api.openai.com/v1/chat/completions" }
+        $script:Model = if (-not [string]::IsNullOrWhiteSpace($env:OPENAI_MODEL)) { $env:OPENAI_MODEL } else { "gpt-4" }
+
+        Write-ColorOutput "✓ API Key configured" $Colors.Success
+        Write-ColorOutput "✓ Endpoint: $script:ApiEndpoint" $Colors.Success
+        Write-ColorOutput "✓ Model: $script:Model" $Colors.Success
+        Write-ColorOutput "✓ Detected PowerShell version: $script:PSVersion`n" $Colors.Success
+
+        if ($script:Install) {
+            # Persist non-secret configuration and (optionally) key data provided via params
+            & setx OPENAI_API_ENDPOINT $script:ApiEndpoint | Out-Null
+            & setx OPENAI_MODEL $script:Model | Out-Null
+            & setx MINI_PS_PSVERSION $script:PSVersion | Out-Null
+
+            # Persistir la API key codificada si existe en el entorno actual
+            if ($env:OPENAI_API_KEY) {
+                $persistB64 = [System.Convert]::ToBase64String(
+                    [System.Text.Encoding]::UTF8.GetBytes($env:OPENAI_API_KEY)
+                )
+                & setx OPENAI_API_KEY_B64 $persistB64 | Out-Null
+                Write-ColorOutput "✓ Persisted OPENAI_API_KEY_B64 from env:OPENAI_API_KEY." $Colors.Success
+            }
+
+            $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+            $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+
+            if ($userPath -notlike "*$scriptDir*") {
+                $newPath = "$userPath;$scriptDir".Trim(';')
+                [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+                Write-ColorOutput "✓ Added script directory to user PATH: $scriptDir" $Colors.Success
+                Write-ColorOutput "  You may need to open a new shell for PATH changes to take effect." $Colors.Warning
+            } else {
+                Write-ColorOutput "✓ Script directory already present in user PATH." $Colors.Success
+            }
+
+            Write-ColorOutput "✓ Configuration persisted (install mode)." $Colors.Success
+            Write-ColorOutput "  Note: OPENAI_API_KEY is not persisted in clear text." $Colors.Warning
+        } else {
+            Write-ColorOutput "ℹ️  Install not requested; running without persisting." $Colors.Info
+        }
+
+        return $true
+
+    } catch {
+        Write-ColorOutput "ERROR in Test-Configuration: $($_.Exception.Message)" $Colors.Error
         return $false
     }
-
-    # Custom endpoint (optional for Azure OpenAI)
-    $script:ApiEndpoint = $env:OPENAI_API_ENDPOINT
-    if ([string]::IsNullOrWhiteSpace($script:ApiEndpoint)) {
-        $script:ApiEndpoint = "https://api.openai.com/v1/chat/completions"
-    }
-
-    # Model
-    $script:Model = $env:OPENAI_MODEL
-    if ([string]::IsNullOrWhiteSpace($script:Model)) {
-        $script:Model = "gpt-4"
-    }
-
-    Write-ColorOutput "✓ API Key configured" $Colors.Success
-    Write-ColorOutput "✓ Endpoint: $script:ApiEndpoint" $Colors.Success
-    Write-ColorOutput "✓ Model: $script:Model`n" $Colors.Success
-
-    return $true
 }
 
 function Add-ToHistory {
@@ -210,6 +254,9 @@ function Invoke-PowerShellCommand {
         # Execute command and capture output and errors
         $output = Invoke-Expression $Command 2>&1 | Out-String
 
+        # Display the command output
+        Write-Host $output
+
         if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) {
             throw "Command finished with exit code: $LASTEXITCODE"
         }
@@ -313,6 +360,9 @@ function Start-IntelligentPowerShell {
     # Initialize with system prompt
     $systemPrompt = @"
 You are an expert PowerShell assistant. Your job is to help users perform tasks using PowerShell commands.
+
+Target PowerShell version: $script:PSVersion
+IMPORTANT: ALL commands you provide must be compatible with PowerShell version $script:PSVersion. If a command requires a newer version or a module that may not exist in $script:PSVersion, explicitly provide an alternative or note the requirement in the "safety" field.
 
 IMPORTANT: You must ALWAYS respond in valid JSON format with the following structure:
 {
