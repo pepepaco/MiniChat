@@ -156,7 +156,9 @@ function renderPage(state, req = null, isDownload = false) {
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">${baseUrl}${metaRefresh}
+<meta charset="UTF-8">
+${baseUrl}
+${metaRefresh}
 <title>${title} - OpenAI Chat</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -165,7 +167,7 @@ function renderPage(state, req = null, isDownload = false) {
 <body class="d-flex flex-column" style="height:100vh;overflow:hidden">
 <form action="/" method="post">
 <input type="hidden" name="__VIEWSTATE" value="${encryptedState}"/>
-<button type="submit" name="action" value="sendMessage" style="display:none"></button>
+<button type="submit" name="action" value="sendMessage" style="display:none" aria-hidden="true"></button>
 <div class="d-flex flex-column" style="height:100vh">
 	<header class="p-3 border-bottom d-flex align-items-center justify-content-between">
 		<span class="fw-bold">${title} <small class="text-secondary">VIEWSTATE</small>
