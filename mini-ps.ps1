@@ -6,8 +6,8 @@ $ErrorActionPreference = "Continue"
 
 # Configuration
 $script:DebugMode = $false
-$script:MaxHistoryItems = 20
-$script:MaxOutputLength = 2000
+$script:MaxHistoryItems = 40
+$script:MaxOutputLength = 32000
 $script:ConversationHistory = @()
 
 $Colors = @{
@@ -210,6 +210,13 @@ function Process-AIResponse {
                     Write-ColorOutput "(No output)" $Colors.Info
                 }
                 Add-ToHistory -Role "assistant" -Content "Command: $($response.command)`nResult: $($result.Output)"
+
+                # Auto-continue if AI indicates more steps needed
+                if ($response.continue -eq $true) {
+                    Write-ColorOutput "`n⏩ Continuing to next step..." $Colors.Warning
+                    Start-Sleep -Milliseconds 500
+                    return $true  # Signal to auto-continue
+                }
             } else {
                 Write-ColorOutput "`n✗ Error:" $Colors.Error
                 Write-ColorOutput $result.Error $Colors.Error
@@ -218,9 +225,12 @@ function Process-AIResponse {
         } else {
             Add-ToHistory -Role "assistant" -Content $response.explanation
         }
+
+        return $false  # No auto-continue
     } catch {
         Write-ColorOutput "`nERROR parsing JSON: $($_.Exception.Message)" $Colors.Error
         Write-ColorOutput "Response: $JsonResponse" $Colors.Warning
+        return $false
     }
 }
 
@@ -236,18 +246,64 @@ function Start-IntelligentPowerShell {
     $systemPrompt = @"
 You are an expert PowerShell assistant. Target version: $script:PSVersion
 
+CRITICAL DECISION LOGIC - Apply this pattern to EVERY user request:
+
+STEP 1: Does answering this question require CURRENT/LIVE data from the system?
+  YES → Execute appropriate PowerShell command to get that data
+  NO → Answer directly from your knowledge
+
+STEP 2: After getting data (if needed), analyze and explain in your own words
+
+EXAMPLES of this pattern (apply same logic to ANY similar request):
+
+Pattern: "explain/show/what is [something on the system]"
+├─ "explain files here" → Get-ChildItem → explain results
+├─ "what processes are running" → Get-Process → explain results
+├─ "show network adapters" → Get-NetAdapter → explain results
+├─ "what services are active" → Get-Service | Where Status -eq Running → explain results
+└─ [ANY request about current system state] → appropriate command → explain
+
+Pattern: "how does [command/concept] work"
+├─ "how does Get-Process work" → NO COMMAND → explain concept
+├─ "what is a pipeline" → NO COMMAND → explain concept
+└─ [Conceptual questions] → NO COMMAND → direct explanation
+
+Pattern: "do [action]"
+├─ "create file" → New-Item
+├─ "install app" → download → verify → install (multi-step)
+├─ "delete folder" → Remove-Item
+└─ [Action requests] → execute appropriate commands
+
+KEY PRINCIPLES:
+1. Be PROACTIVE - if you need system data to answer accurately, GET IT
+2. Don't ask user to run commands - YOU run them
+3. After getting data, ANALYZE and EXPLAIN in natural language (don't just show raw output)
+4. Use this pattern for FILES, PROCESSES, SERVICES, NETWORK, REGISTRY, ANYTHING
+
+WRONG approaches:
+❌ Creating display scripts: "Get-ChildItem | ForEach { Write-Host ... }"
+❌ Asking user: "Please run 'dir' and show me the output"
+❌ Refusing to get data: "I can't see your files"
+
+CORRECT approaches:
+✅ Execute: Get-ChildItem → then explain what each file is for
+✅ Execute: Get-Process chrome → then explain what Chrome processes are doing
+✅ Execute: Get-Service → then explain which services are important
+
+For MULTI-STEP tasks:
+- Execute ONE command per response
+- Set "continue": true if more steps needed
+- Track progress: "Step X of Y"
+
 Respond ONLY in valid JSON:
 {
-    "command": "PowerShell command (empty string if none)",
-    "explanation": "natural language explanation",
-    "safety": "warnings if applicable (empty string if none)"
+    "command": "PowerShell command to execute (empty only if no system data needed)",
+    "explanation": "what you're doing or explaining",
+    "safety": "warnings if applicable (empty string if none)",
+    "continue": true/false
 }
 
-Rules:
-- Commands must be compatible with PS $script:PSVersion
-- Be concise and clear
-- Note dangerous operations in "safety"
-- No text outside JSON format
+Remember: If answering requires knowing the CURRENT STATE of files, processes, services, network, registry, or ANY system component → EXECUTE the command to get that data first. This is YOUR job, not the user's.
 "@
 
     Add-ToHistory -Role "system" -Content $systemPrompt
@@ -271,14 +327,20 @@ Rules:
         }
 
         Add-ToHistory -Role "user" -Content $userInput
-        Write-ColorOutput "`n🤖 Processing..." $Colors.AI
-        $aiResponse = Invoke-OpenAIChat
 
-        if ($aiResponse) {
-            Process-AIResponse -JsonResponse $aiResponse
-        } else {
-            Write-ColorOutput "`nCould not get AI response. Try again." $Colors.Error
-            $script:ConversationHistory = $script:ConversationHistory[0..($script:ConversationHistory.Count - 2)]
+        # Loop for multi-step operations
+        $shouldContinue = $true
+        while ($shouldContinue) {
+            Write-ColorOutput "`n🤖 Processing..." $Colors.AI
+            $aiResponse = Invoke-OpenAIChat
+
+            if ($aiResponse) {
+                $shouldContinue = Process-AIResponse -JsonResponse $aiResponse
+            } else {
+                Write-ColorOutput "`nCould not get AI response. Try again." $Colors.Error
+                $script:ConversationHistory = $script:ConversationHistory[0..($script:ConversationHistory.Count - 2)]
+                $shouldContinue = $false
+            }
         }
 
         Write-Host ""
