@@ -18,58 +18,16 @@ const DEFAULT_CONFIG = {
 };
 
 const CSS = `
-/* Essential chat bubble styles - these don't have direct Bootstrap equivalents */
-.message span {
-  display: inline-block;
-  padding: 8px 12px;
-  border-radius: 16px;
-  margin: 6px 0;
-  max-width: 80%;
-  word-break: break-word;
-}
-.message.user span {
-  background: #0d6efd;
-  color: #fff;
-}
-.message.openai span {
-  background: #e9ecef;
-  color: #333;
-}
-.chat-id-tag {
-  font-size: .75em;
-  color: #888;
-  font-family: monospace;
-  background: #eee;
-  padding: 1px 7px;
-  border-radius: 12px;
-  margin-left: 8px;
-}
-.speed-indicator {
-  font-size: .85em;
-  color: #888;
-  padding-left: 1em;
-}
-@media (max-width: 600px) {
-  .message span {
-    max-width: 100%;
-    font-size: 1em;
-  }
-}
-code,pre {
-  font-family: 'Fira Mono', 'Consolas', monospace;
-  background: #f1f3f5;
-  border-radius: 4px;
-  padding: 2px 6px;
-}
-.btn {
-  transition: background-color 0.2s, transform 0.1s;
-}
-.btn:active {
-  background-color: #0d6efd;
-  color: #fff;
-  transform: scale(0.96);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-}
+/* Unified minimal styles (match index.html) */
+html,body { height:100%; width:100%; margin:0; padding:0; background:#f8f9fa; }
+.message span { display:inline-block; padding:.5rem .75rem; border-radius:1rem; margin:.375rem 0; max-width:80%; word-break:break-word; }
+.message.user span { background:#0d6efd; color:#fff; }
+.message.openai span { background:#e9ecef; color:#333; }
+.chat-id-tag { font-size:.75rem; color:#888; font-family:monospace; background:#eee; padding:2px 7px; border-radius:12px; margin-left:.5rem; }
+.speed-indicator { font-size:.85em; color:#888; padding-left:1em; }
+.chat-messages { scroll-behavior: smooth; }
+code,pre { font-family:'Fira Mono','Consolas',monospace; background:#f1f3f5; border-radius:4px; padding:2px 6px; }
+@media (max-width:600px) { .message span { max-width:100%; font-size:1em; } }
 `;
 
 const ALGORITHM = 'aes-256-cbc';
@@ -240,6 +198,42 @@ app.get('/', (req, res) => {
 	res.send(renderPage(state));
 });
 
+// helper: construye headers de autorización según config (OpenAI o Azure)
+function getAuthHeaders(cfg) {
+	// cfg: { urlBase, apiKey }
+	if (!cfg || !cfg.apiKey) return { 'Content-Type': 'application/json' };
+	const isAzure = cfg.urlBase && cfg.urlBase.includes('openai.azure.com');
+	return {
+		'Content-Type': 'application/json',
+		Authorization: isAzure ? cfg.apiKey : `Bearer ${cfg.apiKey}`,
+		...(isAzure ? { 'api-key': cfg.apiKey } : {}),
+	};
+}
+
+// helper: llama al endpoint de completions y devuelve { ok, status, json, text }
+async function callOpenAI(state, messages, { stream = false } = {}) {
+	const body = JSON.stringify({
+		model: state.config.model,
+		messages,
+		stream,
+	});
+	const fetcher =
+		global.fetch ||
+		((...args) =>
+			import('node-fetch').then(({ default: fetch }) => fetch(...args)));
+	const res = await fetcher(`${state.config.urlBase}/chat/completions`, {
+		method: 'POST',
+		headers: getAuthHeaders(state.config),
+		body,
+	});
+	if (!res.ok) {
+		const text = await res.text();
+		return { ok: false, status: res.status, text };
+	}
+	const data = await res.json();
+	return { ok: true, data };
+}
+
 app.post('/', async (req, res) => {
 	const state = getState(req);
 	const { userInput, action, urlBase, apiKey, model, systemPrompt } = req.body;
@@ -261,45 +255,17 @@ app.post('/', async (req, res) => {
 				}
 
 				try {
-					const fetch =
-						global.fetch ||
-						((...args) =>
-							import('node-fetch').then(({ default: fetch }) =>
-								fetch(...args),
-							));
-					const response = await fetch(
-						`${state.config.urlBase}/chat/completions`,
-						{
-							method: 'POST',
-							headers: {
-								Authorization: state.config.urlBase.includes('openai.azure.com')
-									? state.config.apiKey
-									: `Bearer ${state.config.apiKey}`,
-								...(state.config.urlBase.includes('openai.azure.com')
-									? { 'api-key': state.config.apiKey }
-									: {}),
-								'Content-Type': 'application/json',
-							},
-							body: JSON.stringify({
-								model: state.config.model,
-								messages: convSend,
-								stream: false,
-							}),
-						},
-					);
-
-					if (!response.ok) {
-						const textErr = await response.text();
+					const result = await callOpenAI(state, convSend, { stream: false });
+					if (!result.ok) {
 						state.messages.push({
 							role: 'assistant',
-							content: `Error de API (${response.status}): ${textErr}`,
+							content: `Error de API (${result.status}): ${result.text}`,
 						});
 					} else {
-						const data = await response.json();
-						const reply = data.choices?.[0]?.message?.content ?? 'No response';
+						const reply =
+							result.data.choices?.[0]?.message?.content ?? 'No response';
 						state.messages.push({ role: 'assistant', content: reply });
-						const tokens = reply.length;
-						state.speedInfo = `Done. Tokens: ${tokens}`;
+						state.speedInfo = `Done. Tokens: ${reply.length}`;
 					}
 				} catch (err) {
 					state.messages.push({
@@ -333,44 +299,18 @@ app.post('/', async (req, res) => {
 		case 'refreshTitle':
 			if (state.messages.length > 0) {
 				try {
-					const fetch =
-						global.fetch ||
-						((...args) =>
-							import('node-fetch').then(({ default: fetch }) =>
-								fetch(...args),
-							));
-					const response = await fetch(
-						`${state.config.urlBase}/chat/completions`,
-						{
-							method: 'POST',
-							headers: {
-								Authorization: state.config.urlBase.includes('openai.azure.com')
-									? state.config.apiKey
-									: `Bearer ${state.config.apiKey}`,
-								...(state.config.urlBase.includes('openai.azure.com')
-									? { 'api-key': state.config.apiKey }
-									: {}),
-								'Content-Type': 'application/json',
-							},
-							body: JSON.stringify({
-								model: state.config.model,
-								messages: [
-									...state.messages,
-									{
-										role: 'user',
-										content:
-											'Generate a very short (max 5 words) and concise title for this conversation. Respond only with the title, no other text.',
-									},
-								],
-								stream: false,
-							}),
-						},
-					);
-
-					if (response.ok) {
-						const data = await response.json();
+					const titlePrompt = {
+						role: 'user',
+						content:
+							'Generate a very short (max 5 words) and concise title for this conversation. Respond only with the title, no other text.',
+					};
+					const messagesForTitle = [...state.messages, titlePrompt];
+					const result = await callOpenAI(state, messagesForTitle, {
+						stream: false,
+					});
+					if (result.ok) {
 						const generatedTitle =
-							data.choices?.[0]?.message?.content?.trim() ?? 'New Chat';
+							result.data.choices?.[0]?.message?.content?.trim() ?? 'New Chat';
 						state.title = generatedTitle
 							.replace(/[^a-zA-Z0-9 ]/g, '')
 							.substring(0, 50);
