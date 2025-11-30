@@ -1,8 +1,13 @@
 const express = require('express');
 const crypto = require('crypto');
+const cookieParser = require('cookie-parser'); // Middleware para manejar cookies
 const app = express();
 
+const CONFIG_COOKIE_NAME = 'chat_config_v1';
+
+// Usar cookie-parser para facilitar la lectura y escritura de cookies
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+app.use(cookieParser());
 
 // Dynamically import marked to handle ESM compatibility
 let marked;
@@ -30,6 +35,7 @@ code,pre { font-family:'Fira Mono','Consolas',monospace; background:#f1f3f5; bor
 @media (max-width:600px) { .message span { max-width:100%; font-size:1em; } }
 `;
 
+// --- Funciones de Cifrado y Descifrado ---
 const ALGORITHM = 'aes-256-cbc';
 const ENCRYPTION_KEY = crypto.scryptSync(
 	'your-secret-password-that-is-long-enough',
@@ -59,9 +65,39 @@ function decrypt(text) {
 		return null;
 	}
 }
+// --- Fin Cifrado/Descifrado ---
 
+/**
+ * Carga la configuración (urlBase, apiKey, etc.) desde la cookie cifrada.
+ * @param {express.Request} req
+ * @returns {object} Configuración cargada o un objeto vacío.
+ */
+function loadConfigFromCookie(req) {
+	const configCookie = req.cookies && req.cookies[CONFIG_COOKIE_NAME];
+	if (configCookie) {
+		const decryptedConfig = decrypt(configCookie);
+		if (decryptedConfig) {
+			try {
+				// Return only the config part
+				return JSON.parse(decryptedConfig);
+			} catch (e) {
+				console.error('Error parsing config cookie:', e);
+			}
+		}
+	}
+	return {}; // Return empty object if failed
+}
+
+/**
+ * Carga el estado completo de la sesión (mensajes, chat ID) y la configuración.
+ * La prioridad de la configuración es: __VIEWSTATE (sesión actual) > COOKIE (persistencia) > DEFAULT.
+ * @param {express.Request} req
+ * @returns {object} El objeto de estado completo.
+ */
 function getState(req) {
 	let state = {};
+
+	// 1. Intentar cargar el estado completo (incluyendo config) desde __VIEWSTATE
 	const viewstate =
 		(req.body && req.body.__VIEWSTATE) || (req.query && req.query.__VIEWSTATE);
 
@@ -70,20 +106,32 @@ function getState(req) {
 		if (decrypted) {
 			try {
 				state = JSON.parse(decrypted);
-			} catch (e) {}
+			} catch (e) {
+				console.error('Error parsing viewstate:', e);
+			}
 		}
 	}
 
-	if (!state.config) state.config = { ...DEFAULT_CONFIG };
+	// 2. Si el __VIEWSTATE no tenía configuración (p. ej., página nueva), cargarla desde la cookie.
+	let loadedConfig = state.config || loadConfigFromCookie(req);
+
+	// 3. Aplicar defaults si falta alguna propiedad
+	state.config = { ...DEFAULT_CONFIG, ...loadedConfig };
+
+	// 4. Inicializar otros estados si faltan
 	if (!state.messages) state.messages = [];
 	if (!state.chatId) state.chatId = Date.now().toString(36);
-	if (!state.title) state.title = 'New Chat';
+	if (!state.title) state.title = 'New Chat 💬';
+
+	// Asegurar que la clave de API es un string (puede ser vacío)
+	state.config.apiKey = state.config.apiKey || '';
 
 	return state;
 }
 
 function renderPage(state, req = null, isDownload = false) {
 	const { config, messages, chatId } = state;
+	// El estado completo de la conversación (mensajes) siempre se cifra en el VIEWSTATE
 	const encryptedState = encrypt(JSON.stringify(state));
 	const showConfig = state.showConfig;
 	const lastUserMsgIndex = messages.map(m => m.role).lastIndexOf('user');
@@ -134,31 +182,31 @@ ${baseUrl}
 			? `
     <section class="bg-light border-bottom" style="display: block; padding: 16px;">
       <div class="mb-2">
-          <label class="form-label">Base URL (up to /v1)</label>
-          <input type="text" class="form-control" name="urlBase" value="${
-						config.urlBase
-					}" autocomplete="on"/>
-        </div>
-        <div class="mb-2">
-          <label class="form-label">API Key</label>
-          <input type="text" class="form-control" name="apiKey" value="${
-						config.apiKey
-					}" autocomplete="on"/>
-        </div>
-        <div class="mb-2">
-          <label class="form-label">Model</label>
-          <input type="text" class="form-control" name="model" value="${
-						config.model
-					}" autocomplete="on"/>
-        </div>
-        <div class="mb-2">
-          <label class="form-label">System prompt</label>
-          <textarea class="form-control" name="systemPrompt" rows="2" autocomplete="on">${
-						config.systemPrompt || ''
-					}</textarea>
-          <small class="text-secondary">Controls AI behavior.</small>
-        </div>
-        <button type="submit" class="btn btn-primary btn-sm w-100" name="action" value="saveSettings">Guardar configuración</button>
+        <label class="form-label">Base URL (up to /v1)</label>
+        <input type="text" class="form-control" name="urlBase" value="${
+					config.urlBase
+				}" autocomplete="on"/>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">API Key</label>
+        <input type="text" class="form-control" name="apiKey" value="${
+					config.apiKey
+				}" autocomplete="on"/>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Model</label>
+        <input type="text" class="form-control" name="model" value="${
+					config.model
+				}" autocomplete="on"/>
+      </div>
+      <div class="mb-2">
+        <label class="form-label">System prompt</label>
+        <textarea class="form-control" name="systemPrompt" rows="2" autocomplete="on">${
+					config.systemPrompt || ''
+				}</textarea>
+        <small class="text-secondary">Controls AI behavior.</small>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm w-100" name="action" value="saveSettings">Guardar configuración</button>
     </section>
   `
 			: ''
@@ -284,6 +332,24 @@ app.post('/', async (req, res) => {
 			state.config.model = model || state.config.model;
 			state.config.systemPrompt = systemPrompt || state.config.systemPrompt;
 			state.showConfig = false;
+
+			// --- NUEVO: Guardar la configuración en la cookie encriptada ---
+			const configToSave = {
+				urlBase: state.config.urlBase,
+				apiKey: state.config.apiKey,
+				model: state.config.model,
+				systemPrompt: state.config.systemPrompt,
+			};
+			const encryptedConfig = encrypt(JSON.stringify(configToSave));
+
+			// Setear la cookie con opciones seguras
+			res.cookie(CONFIG_COOKIE_NAME, encryptedConfig, {
+				httpOnly: true, // No accesible por JS del lado del cliente
+				secure: app.get('env') === 'production', // Solo sobre HTTPS en producción
+				maxAge: 365 * 24 * 60 * 60 * 1000, // 1 año de expiración
+				sameSite: 'Strict',
+			});
+			// --- FIN NUEVO ---
 			break;
 
 		case 'downloadChat':
@@ -299,10 +365,11 @@ app.post('/', async (req, res) => {
 		case 'refreshTitle':
 			if (state.messages.length > 0) {
 				try {
+					// Prompt actualizado para incluir un emoji
 					const titlePrompt = {
 						role: 'user',
 						content:
-							'Generate a very short (max 5 words) and concise title for this conversation. Respond only with the title, no other text.',
+							'Generate a very short (max 5 words) and concise title for this conversation, including a single, relevant emoji at the beginning. Respond only with the emoji and the title, no other text.',
 					};
 					const messagesForTitle = [...state.messages, titlePrompt];
 					const result = await callOpenAI(state, messagesForTitle, {
@@ -310,26 +377,27 @@ app.post('/', async (req, res) => {
 					});
 					if (result.ok) {
 						const generatedTitle =
-							result.data.choices?.[0]?.message?.content?.trim() ?? 'New Chat';
-						state.title = generatedTitle
-							.replace(/[^a-zA-Z0-9 ]/g, '')
-							.substring(0, 50);
+							result.data.choices?.[0]?.message?.content?.trim() ??
+							'New Chat 💬';
+
+						// Permitir emojis en el título
+						state.title = generatedTitle.substring(0, 50);
 					} else {
-						state.title = 'Error generating title';
+						state.title = 'Error generating title ❌';
 					}
 				} catch (err) {
-					state.title = 'Error generating title';
+					state.title = 'Error generating title 💥';
 				}
 			} else {
-				state.title = 'New Chat';
+				state.title = 'New Chat 💬';
 			}
 			break;
 		case 'newChat':
 			const newState = {
-				config: { ...state.config },
+				config: { ...state.config }, // Mantiene la config de la sesión anterior
 				messages: [],
 				chatId: Date.now().toString(36),
-				title: 'New Chat',
+				title: 'New Chat 💬',
 				showConfig: state.showConfig || false,
 			};
 			res.send(renderPage(newState));
@@ -344,10 +412,10 @@ app.post('/', async (req, res) => {
 app.post('/newchat', (req, res) => {
 	const oldState = getState(req);
 	const state = {
-		config: { ...oldState.config },
+		config: { ...oldState.config }, // Mantiene la config de la cookie/sesión anterior
 		messages: [],
 		chatId: Date.now().toString(36),
-		title: 'New Chat',
+		title: 'New Chat 💬',
 		showConfig: oldState.showConfig || false,
 	};
 	res.send(renderPage(state));

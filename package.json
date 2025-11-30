@@ -1,15 +1,21 @@
 {
-	"name": "minichat",
+	"name": "viewstate-chat-no-js",
 	"version": "1.0.0",
-	"description": "",
+	"description": "Servidor de chat simple usando Express y el patrón VIEWSTATE/meta refresh para evitar JavaScript del lado del cliente.",
 	"main": "app.js",
 	"scripts": {
 		"start": "node app.js"
 	},
-	"keywords": [],
+	"keywords": [
+		"express",
+		"http",
+		"viewstate",
+		"no-js"
+	],
 	"author": "",
 	"license": "ISC",
 	"dependencies": {
+		"cookie-parser": "^1.4.6",
 		"express": "^5.1.0",
 		"marked": "^16.4.1",
 		"node-fetch": "^3.3.2"
