@@ -1,30 +1,24 @@
 const express = require('express');
 const crypto = require('crypto');
-const cookieParser = require('cookie-parser'); // Middleware para manejar cookies
+const cookieParser = require('cookie-parser');
 const app = express();
-
 const CONFIG_COOKIE_NAME = 'chat_config_v1';
-
-// Usar cookie-parser para facilitar la lectura y escritura de cookies
 app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 app.use(cookieParser());
-
-// Dynamically import marked to handle ESM compatibility
 let marked;
 (async () => {
 	marked = await import('marked');
 })();
-
 const DEFAULT_CONFIG = {
 	urlBase: 'https://api.openai.com/v1',
 	apiKey: '',
 	model: 'gpt-4.1',
 	systemPrompt: 'helpful human assistant',
 };
-
 const CSS = `
-/* Unified minimal styles (match index.html) */
-html,body { height:100%; width:100%; margin:0; padding:0; background:#f8f9fa; }
+/* Animación de entrada suave para simular transición */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+html,body { height:100%; width:100%; margin:0; padding:0; background:#f8f9fa; animation: fadeIn 0.4s ease-out; }
 .message span { display:inline-block; padding:.5rem .75rem; border-radius:1rem; margin:.375rem 0; max-width:80%; word-break:break-word; }
 .message.user span { background:#0d6efd; color:#fff; }
 .message.openai span { background:#e9ecef; color:#333; }
@@ -34,8 +28,6 @@ html,body { height:100%; width:100%; margin:0; padding:0; background:#f8f9fa; }
 code,pre { font-family:'Fira Mono','Consolas',monospace; background:#f1f3f5; border-radius:4px; padding:2px 6px; }
 @media (max-width:600px) { .message span { max-width:100%; font-size:1em; } }
 `;
-
-// --- Funciones de Cifrado y Descifrado ---
 const ALGORITHM = 'aes-256-cbc';
 const ENCRYPTION_KEY = crypto.scryptSync(
 	'your-secret-password-that-is-long-enough',
@@ -65,42 +57,26 @@ function decrypt(text) {
 		return null;
 	}
 }
-// --- Fin Cifrado/Descifrado ---
 
-/**
- * Carga la configuración (urlBase, apiKey, etc.) desde la cookie cifrada.
- * @param {express.Request} req
- * @returns {object} Configuración cargada o un objeto vacío.
- */
 function loadConfigFromCookie(req) {
 	const configCookie = req.cookies && req.cookies[CONFIG_COOKIE_NAME];
 	if (configCookie) {
 		const decryptedConfig = decrypt(configCookie);
 		if (decryptedConfig) {
 			try {
-				// Return only the config part
 				return JSON.parse(decryptedConfig);
 			} catch (e) {
 				console.error('Error parsing config cookie:', e);
 			}
 		}
 	}
-	return {}; // Return empty object if failed
+	return {};
 }
 
-/**
- * Carga el estado completo de la sesión (mensajes, chat ID) y la configuración.
- * La prioridad de la configuración es: __VIEWSTATE (sesión actual) > COOKIE (persistencia) > DEFAULT.
- * @param {express.Request} req
- * @returns {object} El objeto de estado completo.
- */
 function getState(req) {
 	let state = {};
-
-	// 1. Intentar cargar el estado completo (incluyendo config) desde __VIEWSTATE
 	const viewstate =
 		(req.body && req.body.__VIEWSTATE) || (req.query && req.query.__VIEWSTATE);
-
 	if (viewstate) {
 		const decrypted = decrypt(viewstate);
 		if (decrypted) {
@@ -111,43 +87,29 @@ function getState(req) {
 			}
 		}
 	}
-
-	// 2. Si el __VIEWSTATE no tenía configuración (p. ej., página nueva), cargarla desde la cookie.
 	let loadedConfig = state.config || loadConfigFromCookie(req);
-
-	// 3. Aplicar defaults si falta alguna propiedad
 	state.config = { ...DEFAULT_CONFIG, ...loadedConfig };
-
-	// 4. Inicializar otros estados si faltan
 	if (!state.messages) state.messages = [];
 	if (!state.chatId) state.chatId = Date.now().toString(36);
 	if (!state.title) state.title = 'New Chat 💬';
-
-	// Asegurar que la clave de API es un string (puede ser vacío)
 	state.config.apiKey = state.config.apiKey || '';
-
 	return state;
 }
 
 function renderPage(state, req = null, isDownload = false) {
 	const { config, messages, chatId } = state;
-	// El estado completo de la conversación (mensajes) siempre se cifra en el VIEWSTATE
 	const encryptedState = encrypt(JSON.stringify(state));
 	const showConfig = state.showConfig;
 	const lastUserMsgIndex = messages.map(m => m.role).lastIndexOf('user');
-
 	let speedIndicatorHtml = '';
 	if (state.speedInfo) {
 		speedIndicatorHtml = `<br><small class="speed-indicator">${state.speedInfo}</small>`;
 		state.speedInfo = null;
 	}
-
-	// Include base href only when downloading/saving chats
 	const baseUrl =
 		isDownload && req
 			? `<base href="${req.protocol}://${req.get('host')}">`
 			: '';
-
 	return `
 <!DOCTYPE html>
 <html lang="en">
@@ -156,6 +118,9 @@ function renderPage(state, req = null, isDownload = false) {
 ${baseUrl}
 <title>${state.title} - OpenAI Chat</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="view-transition" content="same-origin">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta name="theme-color" content="#0d6efd">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 <style>${CSS}</style>
 </head>
@@ -164,77 +129,74 @@ ${baseUrl}
 <input type="hidden" name="__VIEWSTATE" value="${encryptedState}" />
 <button type="submit" name="action" value="sendMessage" style="display: none;" aria-hidden="true"></button>
 <div class="d-flex flex-column" style="height: 100vh; display: flex; flex-direction: column;">
-  <header class="p-3 border-bottom d-flex align-items-center justify-content-between">
+<header class="p-3 border-bottom d-flex align-items-center justify-content-between">
     <span class="fw-bold">
-      ${state.title} <small class="text-secondary">VIEWSTATE (Encrypted)</small>
-      <span class="chat-id-tag" title="Conversation ID">${chatId}</span>
+    ${state.title} <small class="text-secondary">VIEWSTATE (Encrypted)</small>
+    <span class="chat-id-tag" title="Conversation ID">${chatId}</span>
     </span>
     <div class="d-flex align-items-center gap-2">
-      <button class="btn btn-outline-secondary btn-sm" type="submit" name="action" value="downloadChat" title="Save Chat">Save</button>
-      <button class="btn btn-outline-primary btn-sm" type="submit" name="action" value="refreshTitle" title="Generate Title">Refresh Title</button>
-      <button class="btn btn-outline-success btn-sm" type="submit" name="action" value="newChat" formaction="/newchat" formtarget="_blank" title="New Chat">New chat</button>
-      <button class="settings-toggle btn btn-link p-0" type="submit" name="action" value="toggleConfig" style="font-size:1.35em;line-height:1;vertical-align:middle;color:#0d6efd" title="Configuración">&#9881;</button>
+    <button class="btn btn-outline-secondary btn-sm" type="submit" name="action" value="downloadChat" title="Save Chat">Save</button>
+    <button class="btn btn-outline-primary btn-sm" type="submit" name="action" value="refreshTitle" title="Generate Title">Refresh Title</button>
+    <button class="btn btn-outline-success btn-sm" type="submit" name="action" value="newChat" formaction="/newchat" formtarget="_blank" title="New Chat">New chat</button>
+    <button class="settings-toggle btn btn-link p-0" type="submit" name="action" value="toggleConfig" style="font-size:1.35em;line-height:1;vertical-align:middle;color:#0d6efd" title="Configuración">&#9881;</button>
     </div>
-  </header>
-
-  ${
-		showConfig
-			? `
+</header>
+${
+	showConfig
+		? `
     <section class="bg-light border-bottom" style="display: block; padding: 16px;">
-      <div class="mb-2">
-        <label class="form-label">Base URL (up to /v1)</label>
-        <input type="text" class="form-control" name="urlBase" value="${
-					config.urlBase
-				}" autocomplete="on"/>
-      </div>
-      <div class="mb-2">
-        <label class="form-label">API Key</label>
-        <input type="text" class="form-control" name="apiKey" value="${
-					config.apiKey
-				}" autocomplete="on"/>
-      </div>
-      <div class="mb-2">
-        <label class="form-label">Model</label>
-        <input type="text" class="form-control" name="model" value="${
-					config.model
-				}" autocomplete="on"/>
-      </div>
-      <div class="mb-2">
-        <label class="form-label">System prompt</label>
-        <textarea class="form-control" name="systemPrompt" rows="2" autocomplete="on">${
-					config.systemPrompt || ''
-				}</textarea>
-        <small class="text-secondary">Controls AI behavior.</small>
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm w-100" name="action" value="saveSettings">Guardar configuración</button>
-    </section>
-  `
-			: ''
-	}
-
-    <div class="d-flex flex-column" style="flex: 1; overflow-y: auto;">
-      <main class="p-3 bg-white" id="chatMessages">
-        ${messages
-					.map((msg, i) => {
-						if (msg.role === 'user') {
-							const idAttr =
-								i === lastUserMsgIndex ? ' id="last-user-msg"' : '';
-							return `<div class="message user text-end"${idAttr}><span>${msg.content}</span></div>`;
-						} else {
-							return `<div class="message openai text-start"><span>${marked.parse(
-								msg.content,
-							)}${
-								i === messages.length - 1 ? speedIndicatorHtml : ''
-							}</span></div>`;
-						}
-					})
-					.join('\n')}
-      </main>
-      <div class="d-flex p-3 gap-2 bg-white border-top">
-        <input type="text" class="form-control flex-grow-1" name="userInput" placeholder="Type your message..." autofocus autocomplete="off"/>
-        <button class="btn btn-primary flex-shrink-0" type="submit" name="action" value="sendMessage">Send</button>
-      </div>
+    <div class="mb-2">
+    <label class="form-label">Base URL (up to /v1)</label>
+    <input type="text" class="form-control" name="urlBase" value="${
+			config.urlBase
+		}" autocomplete="on"/>
     </div>
+    <div class="mb-2">
+    <label class="form-label">API Key</label>
+    <input type="text" class="form-control" name="apiKey" value="${
+			config.apiKey
+		}" autocomplete="on"/>
+    </div>
+    <div class="mb-2">
+    <label class="form-label">Model</label>
+    <input type="text" class="form-control" name="model" value="${
+			config.model
+		}" autocomplete="on"/>
+    </div>
+    <div class="mb-2">
+    <label class="form-label">System prompt</label>
+    <textarea class="form-control" name="systemPrompt" rows="2" autocomplete="on">${
+			config.systemPrompt || ''
+		}</textarea>
+    <small class="text-secondary">Controls AI behavior.</small>
+    </div>
+    <button type="submit" class="btn btn-primary btn-sm w-100" name="action" value="saveSettings">Guardar configuración</button>
+    </section>
+`
+		: ''
+}
+<div class="d-flex flex-column" style="flex: 1; overflow-y: auto;">
+    <main class="p-3 bg-white" id="chatMessages">
+    ${messages
+			.map((msg, i) => {
+				if (msg.role === 'user') {
+					const idAttr = i === lastUserMsgIndex ? ' id="last-user-msg"' : '';
+					return `<div class="message user text-end"${idAttr}><span>${msg.content}</span></div>`;
+				} else {
+					return `<div class="message openai text-start"><span>${marked.parse(
+						msg.content,
+					)}${
+						i === messages.length - 1 ? speedIndicatorHtml : ''
+					}</span></div>`;
+				}
+			})
+			.join('\n')}
+    </main>
+    <div class="d-flex p-3 gap-2 bg-white border-top">
+    <input type="text" class="form-control flex-grow-1" name="userInput" placeholder="Type your message..." autofocus autocomplete="off"/>
+    <button class="btn btn-primary flex-shrink-0" type="submit" name="action" value="sendMessage">Send</button>
+    </div>
+</div>
 </div>
 </form>
 </body>
@@ -246,9 +208,7 @@ app.get('/', (req, res) => {
 	res.send(renderPage(state));
 });
 
-// helper: construye headers de autorización según config (OpenAI o Azure)
 function getAuthHeaders(cfg) {
-	// cfg: { urlBase, apiKey }
 	if (!cfg || !cfg.apiKey) return { 'Content-Type': 'application/json' };
 	const isAzure = cfg.urlBase && cfg.urlBase.includes('openai.azure.com');
 	return {
@@ -258,13 +218,8 @@ function getAuthHeaders(cfg) {
 	};
 }
 
-// helper: llama al endpoint de completions y devuelve { ok, status, json, text }
 async function callOpenAI(state, messages, { stream = false } = {}) {
-	const body = JSON.stringify({
-		model: state.config.model,
-		messages,
-		stream,
-	});
+	const body = JSON.stringify({ model: state.config.model, messages, stream });
 	const fetcher =
 		global.fetch ||
 		((...args) =>
@@ -290,7 +245,6 @@ app.post('/', async (req, res) => {
 		case 'sendMessage':
 			if (userInput) {
 				state.messages.push({ role: 'user', content: userInput });
-
 				let convSend = [...state.messages];
 				if (
 					state.config.systemPrompt &&
@@ -301,7 +255,6 @@ app.post('/', async (req, res) => {
 						...convSend,
 					];
 				}
-
 				try {
 					const result = await callOpenAI(state, convSend, { stream: false });
 					if (!result.ok) {
@@ -332,8 +285,6 @@ app.post('/', async (req, res) => {
 			state.config.model = model || state.config.model;
 			state.config.systemPrompt = systemPrompt || state.config.systemPrompt;
 			state.showConfig = false;
-
-			// --- NUEVO: Guardar la configuración en la cookie encriptada ---
 			const configToSave = {
 				urlBase: state.config.urlBase,
 				apiKey: state.config.apiKey,
@@ -341,19 +292,15 @@ app.post('/', async (req, res) => {
 				systemPrompt: state.config.systemPrompt,
 			};
 			const encryptedConfig = encrypt(JSON.stringify(configToSave));
-
-			// Setear la cookie con opciones seguras
 			res.cookie(CONFIG_COOKIE_NAME, encryptedConfig, {
-				httpOnly: true, // No accesible por JS del lado del cliente
-				secure: app.get('env') === 'production', // Solo sobre HTTPS en producción
-				maxAge: 365 * 24 * 60 * 60 * 1000, // 1 año de expiración
+				httpOnly: true,
+				secure: app.get('env') === 'production',
+				maxAge: 365 * 24 * 60 * 60 * 1000,
 				sameSite: 'Strict',
 			});
-			// --- FIN NUEVO ---
 			break;
-
 		case 'downloadChat':
-			const htmlContent = renderPage(state, req, true); // Pass req and set isDownload to true
+			const htmlContent = renderPage(state, req, true);
 			res.setHeader(
 				'Content-Disposition',
 				`attachment; filename="${state.title
@@ -365,7 +312,6 @@ app.post('/', async (req, res) => {
 		case 'refreshTitle':
 			if (state.messages.length > 0) {
 				try {
-					// Prompt actualizado para incluir un emoji
 					const titlePrompt = {
 						role: 'user',
 						content:
@@ -379,8 +325,6 @@ app.post('/', async (req, res) => {
 						const generatedTitle =
 							result.data.choices?.[0]?.message?.content?.trim() ??
 							'New Chat 💬';
-
-						// Permitir emojis en el título
 						state.title = generatedTitle.substring(0, 50);
 					} else {
 						state.title = 'Error generating title ❌';
@@ -394,7 +338,7 @@ app.post('/', async (req, res) => {
 			break;
 		case 'newChat':
 			const newState = {
-				config: { ...state.config }, // Mantiene la config de la sesión anterior
+				config: { ...state.config },
 				messages: [],
 				chatId: Date.now().toString(36),
 				title: 'New Chat 💬',
@@ -405,14 +349,13 @@ app.post('/', async (req, res) => {
 		default:
 			break;
 	}
-
 	res.send(renderPage(state));
 });
 
 app.post('/newchat', (req, res) => {
 	const oldState = getState(req);
 	const state = {
-		config: { ...oldState.config }, // Mantiene la config de la cookie/sesión anterior
+		config: { ...oldState.config },
 		messages: [],
 		chatId: Date.now().toString(36),
 		title: 'New Chat 💬',
