@@ -430,13 +430,13 @@
 				window.open(`?chat=${newId}`, '_blank');
 			});
 
-			// Enter = enviar, Ctrl+Enter = salto de línea
+			// Enter = enviar, Shift+Enter = salto de línea
 			userInput.addEventListener('keydown', e => {
-				if (e.key === 'Enter' && !e.ctrlKey) {
+				if (e.key === 'Enter' && !e.shiftKey) {
 					e.preventDefault();
 					chatForm.requestSubmit();
 				}
-				// Ctrl+Enter: default (salto de línea)
+				// Shift+Enter: default (salto de línea)
 			});
 		</script>
 	</body>
