@@ -152,13 +152,14 @@
 			</section>
 			<main class="chat-messages" id="chatMessages"></main>
 			<form class="d-flex p-3 gap-2" id="chatForm" autocomplete="off">
-				<input
-					type="text"
+				<textarea
 					class="form-control flex-grow-1"
 					id="userInput"
 					placeholder="Type your message..."
 					required
-				/>
+					rows="2"
+					style="resize: vertical"
+				></textarea>
 				<button class="btn btn-primary flex-shrink-0" type="submit">
 					Send
 				</button>
@@ -427,6 +428,15 @@
 				};
 				save(`chatConfig-${newId}`, thisConfig);
 				window.open(`?chat=${newId}`, '_blank');
+			});
+
+			// Enter = enviar, Ctrl+Enter = salto de línea
+			userInput.addEventListener('keydown', e => {
+				if (e.key === 'Enter' && !e.ctrlKey) {
+					e.preventDefault();
+					chatForm.requestSubmit();
+				}
+				// Ctrl+Enter: default (salto de línea)
 			});
 		</script>
 	</body>
