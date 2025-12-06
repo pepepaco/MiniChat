@@ -1,7 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
 const cookieParser = require('cookie-parser');
-const fetch = require('node-fetch').default;
 
 const app = express();
 const CONFIG_COOKIE = 'chat_config_v1';
@@ -28,12 +27,6 @@ html,body{height:100%;width:100%;margin:0;padding:0;background:#f8f9fa;animation
 code,pre{font-family:'Fira Mono','Consolas',monospace;background:#f1f3f5;border-radius:4px;padding:2px 6px}
 @media(max-width:600px){.message span{max-width:100%;font-size:1em}}
 `;
-
-// Import dinámico de marked como variable global
-let marked;
-(async () => {
-	marked = (await import('marked')).marked;
-})();
 
 // Crypto simplificado
 const ENCRYPTION_KEY = crypto.scryptSync(
@@ -98,8 +91,21 @@ const getState = req => {
 	return state;
 };
 
-// Render HTML (síncrono, usa variable global marked)
-const renderPage = (state, req = null, isDownload = false) => {
+// marked cargado dinámicamente para evitar ERR_REQUIRE_ESM
+const getMarked = async () => {
+	if (!getMarked._marked) {
+		const mod = await import('marked');
+		// soportar varias formas de export (default, named)
+		getMarked._marked =
+			(mod && (mod.marked || mod.default?.marked || mod.default)) || mod;
+	}
+	return getMarked._marked;
+};
+
+// Render HTML
+const renderPage = async (state, req = null, isDownload = false) => {
+	// asegurar marked disponible
+	const marked = await getMarked();
 	const { config, messages, chatId, showConfig } = state;
 	const encryptedState = encrypt(JSON.stringify(state));
 	const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
@@ -183,7 +189,7 @@ ${
 				? `<div class="message user text-end"${
 						i === lastUserIdx ? ' id="last-user-msg"' : ''
 				  }><span>${msg.content}</span></div>`
-				: `<div class="message openai text-start"><span>${marked?.parse(
+				: `<div class="message openai text-start"><span>${marked.parse(
 						msg.content,
 				  )}${i === messages.length - 1 ? speedInfo : ''}</span></div>`,
 		)
@@ -234,7 +240,7 @@ const callOpenAI = async (state, messages) => {
 };
 
 // Routes
-app.get('/', (req, res) => res.send(renderPage(getState(req)));
+app.get('/', async (req, res) => res.send(await renderPage(getState(req))));
 
 app.post('/', async (req, res) => {
 	const state = getState(req);
@@ -290,7 +296,7 @@ app.post('/', async (req, res) => {
 					.toLowerCase()}.html"`,
 			);
 			res.setHeader('Content-Type', 'text/html');
-			return res.send(renderPage(state, req, true));
+			return res.send(await renderPage(state, req, true));
 
 		case 'refreshTitle':
 			if (state.messages.length) {
@@ -313,7 +319,7 @@ app.post('/', async (req, res) => {
 
 		case 'newChat':
 			return res.send(
-				renderPage({
+				await renderPage({
 					config: state.config,
 					messages: [],
 					chatId: Date.now().toString(36),
@@ -323,13 +329,13 @@ app.post('/', async (req, res) => {
 			);
 	}
 
-	res.send(renderPage(state));
+	res.send(await renderPage(state));
 });
 
-app.post('/newchat', (req, res) => {
+app.post('/newchat', async (req, res) => {
 	const old = getState(req);
 	res.send(
-		renderPage({
+		await renderPage({
 			config: old.config,
 			messages: [],
 			chatId: Date.now().toString(36),
