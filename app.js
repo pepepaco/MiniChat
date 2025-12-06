@@ -1,7 +1,6 @@
 const express = require('express');
 const crypto = require('crypto');
 const cookieParser = require('cookie-parser');
-const marked = require('marked');
 const fetch = require('node-fetch').default;
 
 const app = express();
@@ -94,7 +93,14 @@ const getState = req => {
 };
 
 // Render HTML
-const renderPage = (state, req = null, isDownload = false) => {
+const getMarked = async () => {
+	if (!getMarked.marked) {
+		getMarked.marked = (await import('marked')).marked;
+	}
+	return getMarked.marked;
+};
+
+const renderPage = async (state, req = null, isDownload = false) => {
 	const { config, messages, chatId, showConfig } = state;
 	const encryptedState = encrypt(JSON.stringify(state));
 	const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
@@ -107,6 +113,8 @@ const renderPage = (state, req = null, isDownload = false) => {
 		isDownload && req
 			? `<base href="${req.protocol}://${req.get('host')}">`
 			: '';
+
+	const marked = await getMarked();
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -229,7 +237,7 @@ const callOpenAI = async (state, messages) => {
 };
 
 // Routes
-app.get('/', (req, res) => res.send(renderPage(getState(req))));
+app.get('/', async (req, res) => res.send(await renderPage(getState(req))));
 
 app.post('/', async (req, res) => {
 	const state = getState(req);
@@ -285,7 +293,7 @@ app.post('/', async (req, res) => {
 					.toLowerCase()}.html"`,
 			);
 			res.setHeader('Content-Type', 'text/html');
-			return res.send(renderPage(state, req, true));
+			return res.send(await renderPage(state, req, true));
 
 		case 'refreshTitle':
 			if (state.messages.length) {
@@ -308,7 +316,7 @@ app.post('/', async (req, res) => {
 
 		case 'newChat':
 			return res.send(
-				renderPage({
+				await renderPage({
 					config: state.config,
 					messages: [],
 					chatId: Date.now().toString(36),
@@ -318,13 +326,13 @@ app.post('/', async (req, res) => {
 			);
 	}
 
-	res.send(renderPage(state));
+	res.send(await renderPage(state));
 });
 
-app.post('/newchat', (req, res) => {
+app.post('/newchat', async (req, res) => {
 	const old = getState(req);
 	res.send(
-		renderPage({
+		await renderPage({
 			config: old.config,
 			messages: [],
 			chatId: Date.now().toString(36),
