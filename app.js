@@ -29,6 +29,12 @@ code,pre{font-family:'Fira Mono','Consolas',monospace;background:#f1f3f5;border-
 @media(max-width:600px){.message span{max-width:100%;font-size:1em}}
 `;
 
+// Import dinámico de marked como variable global
+let marked;
+(async () => {
+	marked = (await import('marked')).marked;
+})();
+
 // Crypto simplificado
 const ENCRYPTION_KEY = crypto.scryptSync(
 	'your-secret-password-that-is-long-enough',
@@ -92,15 +98,8 @@ const getState = req => {
 	return state;
 };
 
-// Render HTML
-const getMarked = async () => {
-	if (!getMarked.marked) {
-		getMarked.marked = (await import('marked')).marked;
-	}
-	return getMarked.marked;
-};
-
-const renderPage = async (state, req = null, isDownload = false) => {
+// Render HTML (síncrono, usa variable global marked)
+const renderPage = (state, req = null, isDownload = false) => {
 	const { config, messages, chatId, showConfig } = state;
 	const encryptedState = encrypt(JSON.stringify(state));
 	const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
@@ -113,8 +112,6 @@ const renderPage = async (state, req = null, isDownload = false) => {
 		isDownload && req
 			? `<base href="${req.protocol}://${req.get('host')}">`
 			: '';
-
-	const marked = await getMarked();
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -186,7 +183,7 @@ ${
 				? `<div class="message user text-end"${
 						i === lastUserIdx ? ' id="last-user-msg"' : ''
 				  }><span>${msg.content}</span></div>`
-				: `<div class="message openai text-start"><span>${marked.parse(
+				: `<div class="message openai text-start"><span>${marked?.parse(
 						msg.content,
 				  )}${i === messages.length - 1 ? speedInfo : ''}</span></div>`,
 		)
@@ -237,7 +234,7 @@ const callOpenAI = async (state, messages) => {
 };
 
 // Routes
-app.get('/', async (req, res) => res.send(await renderPage(getState(req))));
+app.get('/', (req, res) => res.send(renderPage(getState(req)));
 
 app.post('/', async (req, res) => {
 	const state = getState(req);
@@ -293,7 +290,7 @@ app.post('/', async (req, res) => {
 					.toLowerCase()}.html"`,
 			);
 			res.setHeader('Content-Type', 'text/html');
-			return res.send(await renderPage(state, req, true));
+			return res.send(renderPage(state, req, true));
 
 		case 'refreshTitle':
 			if (state.messages.length) {
@@ -316,7 +313,7 @@ app.post('/', async (req, res) => {
 
 		case 'newChat':
 			return res.send(
-				await renderPage({
+				renderPage({
 					config: state.config,
 					messages: [],
 					chatId: Date.now().toString(36),
@@ -326,13 +323,13 @@ app.post('/', async (req, res) => {
 			);
 	}
 
-	res.send(await renderPage(state));
+	res.send(renderPage(state));
 });
 
-app.post('/newchat', async (req, res) => {
+app.post('/newchat', (req, res) => {
 	const old = getState(req);
 	res.send(
-		await renderPage({
+		renderPage({
 			config: old.config,
 			messages: [],
 			chatId: Date.now().toString(36),
