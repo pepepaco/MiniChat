@@ -123,15 +123,18 @@ function Invoke-OpenAIChat {
     try {
         $messages = @()
         foreach ($msg in $script:ConversationHistory) {
-            $messages += @{ role = $msg.role; content = $msg.content }
+            $messages += @{
+                role    = $msg.role
+                content = $msg.content
+            }
         }
 
         $payload = @{
-            model = $script:Model
-            messages = $messages
-            max_tokens = 1500
-            temperature = 0.7
-            response_format = @{ type = "json_object" }
+            model            = $script:Model
+            messages         = $messages
+            max_tokens       = 1500
+            temperature      = 0.7
+            response_format  = @{ type = "json_object" }
         } | ConvertTo-Json -Depth 6
 
         if ($script:DebugMode) {
@@ -140,7 +143,7 @@ function Invoke-OpenAIChat {
 
         $headers = @{
             "Authorization" = "Bearer $env:OPENAI_API_KEY"
-            "Content-Type" = "application/json; charset=utf-8"
+            "Content-Type"  = "application/json; charset=utf-8"
         }
 
         $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
@@ -206,16 +209,30 @@ function Process-AIResponse {
                 Write-ColorOutput "`n✓ Result:" $Colors.Success
                 if ($result.Output.Trim()) {
                     Write-Host $result.Output
+                    $outputForHistory = $result.Output
                 } else {
                     Write-ColorOutput "(No output)" $Colors.Info
+                    $outputForHistory = "<no output>"
                 }
-                Add-ToHistory -Role "assistant" -Content "Command: $($response.command)`nResult: $($result.Output)"
 
-                # Auto-continue if AI indicates more steps needed
+                # Store only the command output (not the full “Command: …” line)
+                Add-ToHistory -Role "assistant" -Content $outputForHistory
+
+                # Auto‑continue if AI indicates more steps needed
                 if ($response.continue -eq $true) {
                     Write-ColorOutput "`n⏩ Continuing to next step..." $Colors.Warning
+                    # Guardamos estado del workflow multi‑step
+                    $state = @{
+                        step                = "waiting-analysis"
+                        originalUserMessage = ($script:ConversationHistory |
+                                                Where-Object role -eq "user" |
+                                                Select-Object -Last 1).content
+                        commandOutput       = $outputForHistory
+                    }
+                    Add-ToHistory -Role "system" -Content ($state | ConvertTo-Json -Compress)
+
                     Start-Sleep -Milliseconds 500
-                    return $true  # Signal to auto-continue
+                    return $true  # Signal to auto‑continue
                 }
             } else {
                 Write-ColorOutput "`n✗ Error:" $Colors.Error
@@ -226,7 +243,7 @@ function Process-AIResponse {
             Add-ToHistory -Role "assistant" -Content $response.explanation
         }
 
-        return $false  # No auto-continue
+        return $false  # No auto‑continue
     } catch {
         Write-ColorOutput "`nERROR parsing JSON: $($_.Exception.Message)" $Colors.Error
         Write-ColorOutput "Response: $JsonResponse" $Colors.Warning
