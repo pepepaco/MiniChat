@@ -100,7 +100,14 @@
 						title="Conversation ID"
 					></span>
 				</span>
-				<div>
+				<div class="d-flex align-items-center">
+					<select
+						id="chatHistorySelect"
+						class="form-select form-select-sm me-2"
+						style="width: auto"
+					>
+						<option value="">Historial...</option>
+					</select>
 					<!-- Botón con estilo Bootstrap -->
 					<button
 						class="btn btn-success btn-sm me-2"
@@ -428,6 +435,26 @@
 				};
 				save(`chatConfig-${newId}`, thisConfig);
 				window.open(`?chat=${newId}`, '_blank');
+			});
+
+			// cargar lista de historiales
+			const chatHistorySelect = document.getElementById('chatHistorySelect');
+			for (const k of Object.keys(localStorage)) {
+				if (!k.startsWith('chatTitle-')) continue;
+				const id = k.replace('chatTitle-', '');
+				const title = localStorage.getItem(k) || 'Sin título';
+				const cfg = load(`chatConfig-${id}`) || {};
+				const model = cfg.model || '';
+				const opt = document.createElement('option');
+				opt.value = id;
+				opt.textContent = `${title} (${model})`;
+				chatHistorySelect.appendChild(opt);
+			}
+
+			// cambio de chat
+			chatHistorySelect.addEventListener('change', e => {
+				const id = e.target.value;
+				if (id) location.href = `?chat=${id}`;
 			});
 
 			// Enter = enviar, Shift+Enter = salto de línea

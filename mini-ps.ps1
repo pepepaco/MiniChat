@@ -132,8 +132,8 @@ function Invoke-OpenAIChat {
         $payload = @{
             model            = $script:Model
             messages         = $messages
-            max_tokens       = 1500
-            temperature      = 0.7
+            #max_tokens       = 1500
+            temperature      = 1
             response_format  = @{ type = "json_object" }
         } | ConvertTo-Json -Depth 6
 
