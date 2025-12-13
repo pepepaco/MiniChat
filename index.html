@@ -174,9 +174,8 @@
 		</div>
 		<script type="module">
 			// ----------- localStorage helpers --------
-			const save = (key, value) =>
-				localStorage.setItem(key, JSON.stringify(value));
-			const load = key => JSON.parse(localStorage.getItem(key));
+			const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+			const load = k => JSON.parse(localStorage.getItem(k));
 
 			// ----------- Chat ID management ----------
 			const generateChatId = () =>
@@ -196,6 +195,7 @@
 			document.getElementById('chatIdTag').textContent = chatId;
 
 			// ----------- DOM elements ---------------
+			// corregir: estos elementos deben obtenerse con getElementById
 			const settingsPanel = document.getElementById('settingsPanel');
 			const settingsToggle = document.getElementById('settingsToggle');
 			const settingsForm = document.getElementById('settingsForm');
@@ -209,6 +209,7 @@
 			const newChatBtn = document.getElementById('newChatBtn');
 			const generateTitleBtn = document.getElementById('generateTitleBtn');
 			const headerTitle = document.getElementById('headerTitle');
+			const chatHistorySelect = document.getElementById('chatHistorySelect');
 
 			// flag mínimo para indicar que el próximo assistant response debe usarse como título
 			let isSettingTitle = false;
@@ -252,29 +253,29 @@
 
 			// ----------- Conversation history --------
 			let conversation = [];
-			const saveConversation = () => {
+			const saveConversation = () =>
 				save(`chatHistory-${chatId}`, conversation);
-			};
 			const restoreHistory = () => {
 				conversation = load(`chatHistory-${chatId}`) ?? [];
 				chatMessages.innerHTML = '';
-				conversation.forEach(msg =>
-					addMessage(msg.content, msg.role === 'user' ? 'user' : 'openai'),
-				);
+				for (const m of conversation)
+					addMessage(m.content, m.role === 'user' ? 'user' : 'openai');
 			};
 
 			// ----------- Markdown & rendering -------
 			const renderMarkdown = text => marked.parse(text);
 			const addMessage = (content, sender) => {
-				const div = document.createElement('div');
-				div.className = `message ${sender}`;
-				div.innerHTML = `<span>${
-					sender === 'openai' ? renderMarkdown(content) : content
-				}</span>`;
-				chatMessages.appendChild(div);
-				// Use the same approach as original working version
-				div.scrollIntoView({ block: 'end' });
+				chatMessages.insertAdjacentHTML(
+					'beforeend',
+					`<div class="message ${sender}"><span>${
+						sender === 'openai' ? renderMarkdown(content) : content
+					}</span></div>`,
+				);
+				chatMessages.lastChild.scrollIntoView({ block: 'end' });
 			};
+
+			// *** FIX: restaurar carga automática del historial (después de addMessage) ***
+			restoreHistory();
 
 			// ----------- OpenAI streaming -----------
 			const streamOpenAI = async ({
@@ -286,75 +287,76 @@
 				onDone,
 				onError,
 			}) => {
-				const headers = {
-					'Content-Type': 'application/json',
-					Authorization: `Bearer ${apiKey}`,
-				};
-				const startTime = performance.now();
-				let lastText = '',
-					tokenCount = 0;
-				const response = await fetch(`${urlBase}/chat/completions`, {
-					method: 'POST',
-					headers,
-					body: JSON.stringify({ model, messages: conversation, stream: true }),
-				});
-				const reader = response.body.getReader();
-				const decoder = new TextDecoder();
-				let buffer = '',
-					done = false;
-				while (!done) {
-					const { value, done: doneReading } = await reader.read();
-					if (doneReading) break;
-					buffer += decoder.decode(value, { stream: true });
-					const lines = buffer.split('\n');
-					buffer = lines.pop();
-					for (let line of lines) {
-						const ltrim = line.trim();
-						if (!ltrim.startsWith('data:')) continue;
-						const jsonStr = ltrim.slice(5).trim();
-						if (jsonStr === '[DONE]') {
-							done = true;
-							break;
-						}
-						const parsed = JSON.parse(jsonStr);
-						const delta = parsed.choices[0]?.delta?.content ?? '';
-						if (delta) {
-							lastText += delta;
-							tokenCount++;
-							onChunk?.(
-								lastText,
-								tokenCount,
-								(performance.now() - startTime) / 1000,
-							);
+				const start = performance.now();
+				let text = '',
+					tokens = 0;
+				try {
+					const res = await fetch(`${urlBase}/chat/completions`, {
+						method: 'POST',
+						headers: {
+							'Content-Type': 'application/json',
+							Authorization: `Bearer ${apiKey}`,
+						},
+						body: JSON.stringify({
+							model,
+							messages: conversation,
+							stream: true,
+						}),
+					});
+					const reader = res.body.getReader();
+					const decoder = new TextDecoder();
+					let buffer = '';
+
+					while (true) {
+						const { value, done } = await reader.read();
+						if (done) break;
+						buffer += decoder.decode(value, { stream: true });
+						const lines = buffer.split('\n');
+						buffer = lines.pop();
+
+						for (const l of lines) {
+							if (!l.trim().startsWith('data:')) continue;
+							const d = l.slice(5).trim();
+							if (d === '[DONE]')
+								return onDone(text, tokens, (performance.now() - start) / 1000);
+							const delta = JSON.parse(d).choices[0]?.delta?.content;
+							if (!delta) continue;
+							text += delta;
+							tokens++;
+							onChunk(text, tokens, (performance.now() - start) / 1000);
 						}
 					}
+				} catch {
+					onError?.();
 				}
-				onDone?.(lastText, tokenCount, (performance.now() - startTime) / 1000);
 			};
 
-			// ----------- Chat submission/stream -------
-			restoreHistory();
+			// compactar armado de convSend
+			const prepareConversation = config => {
+				const sys = config.systemPrompt;
+				return sys && (!conversation[0] || conversation[0].role !== 'system')
+					? [{ role: 'system', content: sys }, ...conversation]
+					: conversation;
+			};
 
+			// restaurar contador de mensajes (se había eliminado en el refactor)
 			let messageCounter = 0;
-			const handleChatSubmit = async e => {
+
+			// Evento de envío más compacto
+			chatForm.addEventListener('submit', async e => {
 				e.preventDefault();
 				const text = userInput.value.trim();
 				if (!text) return;
 
-				// Si el mensaje comienza con --set-title activamos la bandera
 				isSettingTitle = text.startsWith('--set-title');
-
 				addMessage(text, 'user');
 				userInput.value = '';
 
 				const config = load(configKey) ?? {};
-				const sysPrompt = config.systemPrompt || '';
 				conversation.push({ role: 'user', content: text });
 				saveConversation();
 
-				let convSend = [...conversation];
-				if (sysPrompt && !(convSend.length && convSend[0].role === 'system'))
-					convSend = [{ role: 'system', content: sysPrompt }, ...convSend];
+				const convSend = prepareConversation(config);
 
 				messageCounter++;
 				const replyId = `reply-${messageCounter}`;
@@ -398,7 +400,7 @@
 							const title =
 								raw
 									.replace(/\r?\n/g, ' ')
-									.replace(/[^a-zA-Z0-9 \-]/g, '')
+									.replace(/[^\p{L}\p{N}\p{Extended_Pictographic} \-]/gu, '') // permite emojis 👍
 									.trim()
 									.substring(0, 50) || 'New Chat';
 							document.title = title;
@@ -414,8 +416,7 @@
 						addMessage('Connection error (streaming failed).', 'openai');
 					},
 				});
-			};
-			chatForm.addEventListener('submit', handleChatSubmit);
+			});
 
 			// Load saved title if exists (mover aquí para aplicar en header)
 			const savedTitle = localStorage.getItem(`chatTitle-${chatId}`);
@@ -437,24 +438,22 @@
 				window.open(`?chat=${newId}`, '_blank');
 			});
 
-			// cargar lista de historiales
-			const chatHistorySelect = document.getElementById('chatHistorySelect');
-			for (const k of Object.keys(localStorage)) {
+			// cargar lista de historiales (FIX: no usar JSON.parse)
+			for (const k in localStorage) {
 				if (!k.startsWith('chatTitle-')) continue;
-				const id = k.replace('chatTitle-', '');
-				const title = localStorage.getItem(k) || 'Sin título';
-				const cfg = load(`chatConfig-${id}`) || {};
-				const model = cfg.model || '';
-				const opt = document.createElement('option');
-				opt.value = id;
-				opt.textContent = `${title} (${model})`;
-				chatHistorySelect.appendChild(opt);
+				const id = k.slice(10);
+				const title = localStorage.getItem(k) || 'Sin título'; // <-- FIX
+				const model = load(`chatConfig-${id}`)?.model || '';
+
+				chatHistorySelect.insertAdjacentHTML(
+					'beforeend',
+					`<option value="${id}">${title} (${model})</option>`,
+				);
 			}
 
-			// cambio de chat
+			// cambio de chat (compactado)
 			chatHistorySelect.addEventListener('change', e => {
-				const id = e.target.value;
-				if (id) location.href = `?chat=${id}`;
+				if (e.target.value) location.search = `?chat=${e.target.value}`;
 			});
 
 			// Enter = enviar, Shift+Enter = salto de línea
