@@ -331,13 +331,13 @@
 				}
 			};
 
-			// compactar armado de convSend
 			const prepareConversation = config => {
-				const sys = config.systemPrompt;
-				return sys && (!conversation[0] || conversation[0].role !== 'system')
-					? [{ role: 'system', content: sys }, ...conversation]
-					: conversation;
-			};
+	const sys = config.systemPrompt?.trim();
+	const base = conversation.map(m => ({ ...m }));
+	return sys && base[0]?.role !== 'system'
+		? [{ role: 'system', content: sys }, ...base]
+		: base;
+};
 
 			// restaurar contador de mensajes (se había eliminado en el refactor)
 			let messageCounter = 0;
