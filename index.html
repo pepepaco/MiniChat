@@ -83,7 +83,11 @@
 			.settings-panel.show {
 				display: block;
 			}
-			/* Reduce reglas responsivas repetitivas; confiar en Bootstrap utilities */
+			@media (max-width: 600px) {
+				header { flex-wrap: wrap; gap: 5px; }
+				#headerTitle { width: 100%; }
+				.chat-id-tag { display: none; }
+			}
 		</style>
 	</head>
 
@@ -173,11 +177,9 @@
 			</form>
 		</div>
 		<script type="module">
-			// ----------- localStorage helpers --------
 			const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
 			const load = k => JSON.parse(localStorage.getItem(k));
 
-			// ----------- Chat ID management ----------
 			const generateChatId = () =>
 				globalThis.crypto?.randomUUID?.() ||
 				Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -194,8 +196,6 @@
 			const chatId = getOrCreateChatId();
 			document.getElementById('chatIdTag').textContent = chatId;
 
-			// ----------- DOM elements ---------------
-			// corregir: estos elementos deben obtenerse con getElementById
 			const settingsPanel = document.getElementById('settingsPanel');
 			const settingsToggle = document.getElementById('settingsToggle');
 			const settingsForm = document.getElementById('settingsForm');
@@ -211,22 +211,15 @@
 			const headerTitle = document.getElementById('headerTitle');
 			const chatHistorySelect = document.getElementById('chatHistorySelect');
 
-			// flag mínimo para indicar que el próximo assistant response debe usarse como título
 			let isSettingTitle = false;
+			const SET_TITLE_PROMPT = '--set-title: Generate a very short (max 5 words) and concise title for this conversation. Respond only with the title, no other text.';
 
-			// El prompt especial (se inserta en el input cuando se pulsa el botón)
-			const SET_TITLE_PROMPT =
-				'--set-title: Generate a very short (max 5 words) and concise title for this conversation. Respond only with the title, no other text.';
-
-			generateTitleBtn.addEventListener('click', () => {
+			generateTitleBtn.onclick = () => {
 				userInput.value = SET_TITLE_PROMPT;
 				userInput.focus();
-			});
+			};
 
-			// ----------- Config management ----------
 			const configKey = `chatConfig-${chatId}`;
-
-			// Cargar configuración del chat actual, o valores por defecto
 			const loadConfig = () => {
 				const config = load(configKey) ?? {};
 				urlBaseInput.value = config.urlBase ?? 'https://api.openai.com/v1';
@@ -236,11 +229,9 @@
 			};
 			loadConfig();
 
-			settingsToggle.addEventListener('click', () =>
-				settingsPanel.classList.toggle('show'),
-			);
+			settingsToggle.onclick = () => settingsPanel.classList.toggle('show');
 
-			settingsForm.addEventListener('submit', e => {
+			settingsForm.onsubmit = e => {
 				e.preventDefault();
 				save(configKey, {
 					urlBase: urlBaseInput.value.trim(),
@@ -249,221 +240,122 @@
 					systemPrompt: systemPromptInput.value.trim(),
 				});
 				settingsPanel.classList.remove('show');
-			});
+			};
 
-			// ----------- Conversation history --------
 			let conversation = [];
-			const saveConversation = () =>
-				save(`chatHistory-${chatId}`, conversation);
+			const saveConversation = () => save(`chatHistory-${chatId}`, conversation);
 			const restoreHistory = () => {
 				conversation = load(`chatHistory-${chatId}`) ?? [];
 				chatMessages.innerHTML = '';
-				for (const m of conversation)
-					addMessage(m.content, m.role === 'user' ? 'user' : 'openai');
+				for (const m of conversation) addMessage(m.content, m.role === 'user' ? 'user' : 'openai');
 			};
 
-			// ----------- Markdown & rendering -------
 			const renderMarkdown = text => marked.parse(text);
 			const addMessage = (content, sender) => {
-				chatMessages.insertAdjacentHTML(
-					'beforeend',
-					`<div class="message ${sender}"><span>${
-						sender === 'openai' ? renderMarkdown(content) : content
-					}</span></div>`,
-				);
+				chatMessages.insertAdjacentHTML('beforeend', `<div class="message ${sender}"><span>${sender === 'openai' ? renderMarkdown(content) : content}</span></div>`);
 				chatMessages.lastChild.scrollIntoView({ block: 'end' });
 			};
 
-			// *** FIX: restaurar carga automática del historial (después de addMessage) ***
 			restoreHistory();
 
-			// ----------- OpenAI streaming -----------
-			const streamOpenAI = async ({
-				urlBase,
-				apiKey,
-				model,
-				conversation,
-				onChunk,
-				onDone,
-				onError,
-			}) => {
+			const streamOpenAI = async ({ urlBase, apiKey, model, conversation, onChunk, onDone, onError }) => {
 				const start = performance.now();
-				let text = '',
-					tokens = 0;
+				let text = '', tokens = 0;
 				try {
 					const res = await fetch(`${urlBase}/chat/completions`, {
 						method: 'POST',
-						headers: {
-							'Content-Type': 'application/json',
-							Authorization: `Bearer ${apiKey}`,
-						},
-						body: JSON.stringify({
-							model,
-							messages: conversation,
-							stream: true,
-						}),
+						headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+						body: JSON.stringify({ model, messages: conversation, stream: true }),
 					});
-					const reader = res.body.getReader();
-					const decoder = new TextDecoder();
+					const reader = res.body.getReader(), decoder = new TextDecoder();
 					let buffer = '';
-
 					while (true) {
 						const { value, done } = await reader.read();
 						if (done) break;
 						buffer += decoder.decode(value, { stream: true });
 						const lines = buffer.split('\n');
 						buffer = lines.pop();
-
 						for (const l of lines) {
 							if (!l.trim().startsWith('data:')) continue;
 							const d = l.slice(5).trim();
-							if (d === '[DONE]')
-								return onDone(text, tokens, (performance.now() - start) / 1000);
+							if (d === '[DONE]') return onDone(text, tokens, (performance.now() - start) / 1000);
 							const delta = JSON.parse(d).choices[0]?.delta?.content;
 							if (!delta) continue;
-							text += delta;
-							tokens++;
+							text += delta; tokens++;
 							onChunk(text, tokens, (performance.now() - start) / 1000);
 						}
 					}
-				} catch {
-					onError?.();
-				}
+				} catch { onError?.(); }
 			};
 
 			const prepareConversation = config => {
-	const sys = config.systemPrompt?.trim();
-	const base = conversation.map(m => ({ ...m }));
-	return sys && base[0]?.role !== 'system'
-		? [{ role: 'system', content: sys }, ...base]
-		: base;
-};
+				const sys = config.systemPrompt?.trim();
+				const base = conversation.map(m => ({ ...m }));
+				return sys && base[0]?.role !== 'system' ? [{ role: 'system', content: sys }, ...base] : base;
+			};
 
-			// restaurar contador de mensajes (se había eliminado en el refactor)
 			let messageCounter = 0;
-
-			// Evento de envío más compacto
-			chatForm.addEventListener('submit', async e => {
+			chatForm.onsubmit = async e => {
 				e.preventDefault();
 				const text = userInput.value.trim();
 				if (!text) return;
-
 				isSettingTitle = text.startsWith('--set-title');
 				addMessage(text, 'user');
 				userInput.value = '';
-
 				const config = load(configKey) ?? {};
 				conversation.push({ role: 'user', content: text });
 				saveConversation();
-
 				const convSend = prepareConversation(config);
-
 				messageCounter++;
-				const replyId = `reply-${messageCounter}`;
-				const speedId = `speed-${messageCounter}`;
-				addMessage(
-					`<span id="${replyId}"></span><br><small id="${speedId}" class="speed-indicator"></small>`,
-					'openai',
-				);
-				const replyElem = document.getElementById(replyId);
-				const speedElem = document.getElementById(speedId);
-				const msgDiv = chatMessages.lastChild;
-
+				const replyId = `reply-${messageCounter}`, speedId = `speed-${messageCounter}`;
+				addMessage(`<span id="${replyId}"></span><br><small id="${speedId}" class="speed-indicator"></small>`, 'openai');
+				const replyElem = document.getElementById(replyId), speedElem = document.getElementById(speedId), msgDiv = chatMessages.lastChild;
 				await streamOpenAI({
 					urlBase: config.urlBase ?? 'https://api.openai.com/v1',
 					apiKey: config.apiKey ?? '',
 					model: config.model ?? 'gpt-3.5-turbo',
 					conversation: convSend,
 					onChunk: (content, tokens, secs) => {
-						if (tokens % 10 === 0 || tokens === 1)
-							replyElem.innerHTML = renderMarkdown(content);
-						if (tokens > 0)
-							speedElem.innerText = `Tokens: ${tokens} • Speed: ${(
-								tokens / (secs || 1)
-							).toFixed(2)} tks/sec`;
+						if (tokens % 10 === 0 || tokens === 1) replyElem.innerHTML = renderMarkdown(content);
+						if (tokens > 0) speedElem.innerText = `Tokens: ${tokens} • Speed: ${(tokens / (secs || 1)).toFixed(2)} tks/sec`;
 						msgDiv.scrollIntoView({ block: 'end' });
 					},
 					onDone: async (content, tokens, secs) => {
-						if (content) {
-							conversation.push({ role: 'assistant', content });
-							await saveConversation();
-						}
+						if (content) { conversation.push({ role: 'assistant', content }); await saveConversation(); }
 						replyElem.innerHTML = renderMarkdown(content);
-						speedElem.innerText = `Done. Tokens: ${tokens}, Max speed: ${(
-							tokens / (secs || 1)
-						).toFixed(2)} tks/sec`;
-
-						// Si venimos de un --set-title usamos la respuesta como título
+						speedElem.innerText = `Done. Tokens: ${tokens}, Max speed: ${(tokens / (secs || 1)).toFixed(2)} tks/sec`;
 						if (isSettingTitle) {
-							const raw = (content || '').trim();
-							// limpiar: solo texto plano corto y sin saltos
-							const title =
-								raw
-									.replace(/\r?\n/g, ' ')
-									.replace(/[^\p{L}\p{N}\p{Extended_Pictographic} \-]/gu, '') // permite emojis 👍
-									.trim()
-									.substring(0, 50) || 'New Chat';
+							const title = (content || '').trim().replace(/\r?\n/g, ' ').replace(/[^\p{L}\p{N}\p{Extended_Pictographic} \-]/gu, '').trim().substring(0, 50) || 'New Chat';
 							document.title = title;
-							// actualizar header (mantener pequeña etiqueta)
 							headerTitle.innerHTML = `${title} <small class="text-secondary">Streaming Markdown</small><span id="chatIdTag" class="chat-id-tag" title="Conversation ID">${chatId}</span>`;
-							// guardar título por chat
 							localStorage.setItem(`chatTitle-${chatId}`, title);
 							isSettingTitle = false;
 						}
 					},
-					onError: () => {
-						chatMessages.lastChild.remove();
-						addMessage('Connection error (streaming failed).', 'openai');
-					},
+					onError: () => { chatMessages.lastChild.remove(); addMessage('Connection error (streaming failed).', 'openai'); },
 				});
-			});
+			};
 
-			// Load saved title if exists (mover aquí para aplicar en header)
 			const savedTitle = localStorage.getItem(`chatTitle-${chatId}`);
 			if (savedTitle) {
 				document.title = savedTitle;
 				headerTitle.innerHTML = `${savedTitle} <small class="text-secondary">Streaming Markdown</small><span id="chatIdTag" class="chat-id-tag" title="Conversation ID">${chatId}</span>`;
 			}
 
-			// ----------- Start new chat -------------
-			newChatBtn.addEventListener('click', () => {
+			newChatBtn.onclick = () => {
 				const newId = generateChatId();
-				const thisConfig = {
-					urlBase: urlBaseInput.value.trim(),
-					apiKey: apiKeyInput.value.trim(),
-					model: modelInput.value.trim(),
-					systemPrompt: systemPromptInput.value.trim(),
-				};
-				save(`chatConfig-${newId}`, thisConfig);
+				save(`chatConfig-${newId}`, { urlBase: urlBaseInput.value.trim(), apiKey: apiKeyInput.value.trim(), model: modelInput.value.trim(), systemPrompt: systemPromptInput.value.trim() });
 				window.open(`?chat=${newId}`, '_blank');
+			};
+
+			Object.keys(localStorage).filter(k => k.startsWith('chatTitle-')).forEach(k => {
+				const id = k.slice(10), title = localStorage.getItem(k) || 'Sin título', m = load(`chatConfig-${id}`)?.model || '';
+				chatHistorySelect.insertAdjacentHTML('beforeend', `<option value="${id}">${title} (${m})</option>`);
 			});
 
-			// cargar lista de historiales (FIX: no usar JSON.parse)
-			for (const k in localStorage) {
-				if (!k.startsWith('chatTitle-')) continue;
-				const id = k.slice(10);
-				const title = localStorage.getItem(k) || 'Sin título'; // <-- FIX
-				const model = load(`chatConfig-${id}`)?.model || '';
+			chatHistorySelect.onchange = e => e.target.value && (location.search = '?chat=' + e.target.value);
 
-				chatHistorySelect.insertAdjacentHTML(
-					'beforeend',
-					`<option value="${id}">${title} (${model})</option>`,
-				);
-			}
-
-			// cambio de chat (compactado)
-			chatHistorySelect.addEventListener('change', e => {
-				if (e.target.value) location.search = `?chat=${e.target.value}`;
-			});
-
-			// Enter = enviar, Shift+Enter = salto de línea
-			userInput.addEventListener('keydown', e => {
-				if (e.key === 'Enter' && !e.shiftKey) {
-					e.preventDefault();
-					chatForm.requestSubmit();
-				}
-				// Shift+Enter: default (salto de línea)
-			});
+			userInput.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatForm.requestSubmit(); } };
 		</script>
 	</body>
 </html>
