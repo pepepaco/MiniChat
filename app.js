@@ -157,25 +157,25 @@ ${
 <label class="form-label">Base URL</label>
 <input type="text" class="form-control" name="urlBase" value="${
 				config.urlBase
-		  }" autocomplete="on"/>
+			}" autocomplete="on"/>
 </div>
 <div class="mb-2">
 <label class="form-label">API Key</label>
 <input type="text" class="form-control" name="apiKey" value="${
 				config.apiKey
-		  }" autocomplete="on"/>
+			}" autocomplete="on"/>
 </div>
 <div class="mb-2">
 <label class="form-label">Model</label>
 <input type="text" class="form-control" name="model" value="${
 				config.model
-		  }" autocomplete="on"/>
+			}" autocomplete="on"/>
 </div>
 <div class="mb-2">
 <label class="form-label">System prompt</label>
 <textarea class="form-control" name="systemPrompt" rows="2" autocomplete="on">${
 				config.systemPrompt || ''
-		  }</textarea>
+			}</textarea>
 </div>
 <button type="submit" class="btn btn-primary btn-sm w-100" name="action" value="saveSettings">Guardar</button>
 </section>`
@@ -188,10 +188,10 @@ ${
 			msg.role === 'user'
 				? `<div class="message user text-end"${
 						i === lastUserIdx ? ' id="last-user-msg"' : ''
-				  }><span>${msg.content}</span></div>`
+					}><span>${msg.content}</span></div>`
 				: `<div class="message openai text-start"><span>${marked.parse(
 						msg.content,
-				  )}${i === messages.length - 1 ? speedInfo : ''}</span></div>`,
+					)}${i === messages.length - 1 ? speedInfo : ''}</span></div>`,
 		)
 		.join('\n')}
   </main>
@@ -312,7 +312,7 @@ app.post('/', async (req, res) => {
 					? (
 							result.data.choices?.[0]?.message?.content?.trim() ??
 							'New Chat 💬'
-					  ).substring(0, 50)
+						).substring(0, 50)
 					: 'Error ❌';
 			}
 			break;

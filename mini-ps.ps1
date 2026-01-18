@@ -27,9 +27,9 @@ function Write-ColorOutput {
 function Show-Banner {
     Clear-Host
     Write-ColorOutput "`n╔════════════════════════════════════════════════════════════╗" $Colors.Info
-    Write-ColorOutput "║      Intelligent PowerShell - AI Assistant v1.0            ║" $Colors.Info
+    Write-ColorOutput "║      Intelligent PowerShell - AI Assistant v2.0            ║" $Colors.Info
     Write-ColorOutput "╚════════════════════════════════════════════════════════════╝`n" $Colors.Info
-    Write-ColorOutput "Special commands: install | history | debug | exit/quit`n" $Colors.Warning
+    Write-ColorOutput "Special commands: install | history | debug | clear | exit/quit`n" $Colors.Warning
 }
 
 function Test-Configuration {
@@ -56,7 +56,6 @@ function Install-Configuration {
     try {
         Write-ColorOutput "`nPersisting configuration to User environment..." $Colors.Info
 
-        # Persist all variables
         if ($env:OPENAI_API_KEY) {
             [Environment]::SetEnvironmentVariable("OPENAI_API_KEY", $env:OPENAI_API_KEY, "User")
             Write-ColorOutput "✓ OPENAI_API_KEY saved" $Colors.Success
@@ -66,7 +65,6 @@ function Install-Configuration {
         [Environment]::SetEnvironmentVariable("OPENAI_MODEL", $script:Model, "User")
         Write-ColorOutput "✓ OPENAI_API_ENDPOINT and OPENAI_MODEL saved" $Colors.Success
 
-        # Add script to PATH
         $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
         $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 
@@ -132,7 +130,6 @@ function Invoke-OpenAIChat {
         $payload = @{
             model            = $script:Model
             messages         = $messages
-            #max_tokens       = 1500
             temperature      = 1
             response_format  = @{ type = "json_object" }
         } | ConvertTo-Json -Depth 6
@@ -149,7 +146,6 @@ function Invoke-OpenAIChat {
         $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
         $response = Invoke-RestMethod -Uri $script:ApiEndpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8"
 
-        # Fix UTF-8 encoding
         $content = $response.choices[0].message.content
         $bytes = [System.Text.Encoding]::GetEncoding('ISO-8859-1').GetBytes($content)
         $content = [System.Text.Encoding]::UTF8.GetString($bytes)
@@ -179,75 +175,106 @@ function Invoke-PowerShellCommand {
             throw "Exit code: $global:LASTEXITCODE"
         }
 
-        return @{ Success = $true; Output = $output }
+        return @{ Success = $true; Output = $output.Trim() }
     } catch {
-        $errorType = if ($_.Exception.Message -match "not recognized|no se reconoce") { "Command not found" } else { "Execution error" }
+        $errorType = if ($_.Exception.Message -match "not recognized|no se reconoce") {
+            "Command not found"
+        } else {
+            "Execution error"
+        }
         return @{ Success = $false; Error = "$errorType`: $($_.Exception.Message)" }
     }
 }
 
-function Process-AIResponse {
-    param([string]$JsonResponse)
+function Process-UserQuery {
+    param([string]$UserInput)
+
+    Write-ColorOutput "`n🤖 Analyzing request..." $Colors.AI
+
+    # Paso 1: IA decide qué comando ejecutar
+    $aiResponse = Invoke-OpenAIChat
+
+    if (-not $aiResponse) {
+        Write-ColorOutput "Could not get AI response. Try again." $Colors.Error
+        return
+    }
 
     try {
-        $response = $JsonResponse | ConvertFrom-Json
+        $response = $aiResponse | ConvertFrom-Json
 
+        # Mostrar lo que la IA planea hacer
         if ($response.explanation) {
-            Write-ColorOutput "`n💡 Explanation:" $Colors.AI
+            Write-ColorOutput "`n💡 Plan:" $Colors.AI
             Write-ColorOutput $response.explanation "White"
         }
 
         if ($response.safety) {
-            Write-ColorOutput "`n⚠️  Safety notes:" $Colors.Warning
+            Write-ColorOutput "`n⚠️  Safety:" $Colors.Warning
             Write-ColorOutput $response.safety "Yellow"
         }
 
+        # Paso 2: Ejecutar el comando si existe
         if ($response.command -and $response.command.Trim()) {
-            $result = Invoke-PowerShellCommand -Command $response.command
+            $command = $response.command.Trim()
+            $result = Invoke-PowerShellCommand -Command $command
 
+            # Paso 3: Preparar el resultado para que la IA lo analice
             if ($result.Success) {
-                Write-ColorOutput "`n✓ Result:" $Colors.Success
-                if ($result.Output.Trim()) {
+                $outputText = if ($result.Output) {
+                    Write-ColorOutput "`n✓ Output:" $Colors.Success
                     Write-Host $result.Output
-                    $outputForHistory = $result.Output
+                    $result.Output
                 } else {
-                    Write-ColorOutput "(No output)" $Colors.Info
-                    $outputForHistory = "<no output>"
+                    Write-ColorOutput "`n✓ Command executed successfully (no output)" $Colors.Success
+                    "<No output>"
                 }
 
-                # Store only the command output (not the full “Command: …” line)
-                Add-ToHistory -Role "assistant" -Content $outputForHistory
+                # Agregar resultado al historial
+                Add-ToHistory -Role "assistant" -Content @"
+[EXECUTED] $command
 
-                # Auto‑continue if AI indicates more steps needed
-                if ($response.continue -eq $true) {
-                    Write-ColorOutput "`n⏩ Continuing to next step..." $Colors.Warning
-                    # Guardamos estado del workflow multi‑step
-                    $state = @{
-                        step                = "waiting-analysis"
-                        originalUserMessage = ($script:ConversationHistory |
-                                                Where-Object role -eq "user" |
-                                                Select-Object -Last 1).content
-                        commandOutput       = $outputForHistory
+[OUTPUT]
+$outputText
+"@
+
+                # Paso 4: IA analiza el resultado
+                Write-ColorOutput "`n🤖 Analyzing result..." $Colors.AI
+                $analysisResponse = Invoke-OpenAIChat
+
+                if ($analysisResponse) {
+                    $analysis = $analysisResponse | ConvertFrom-Json
+
+                    if ($analysis.explanation) {
+                        Write-ColorOutput "`n📊 Analysis:" $Colors.AI
+                        Write-ColorOutput $analysis.explanation "White"
                     }
-                    Add-ToHistory -Role "system" -Content ($state | ConvertTo-Json -Compress)
 
-                    Start-Sleep -Milliseconds 500
-                    return $true  # Signal to auto‑continue
+                    Add-ToHistory -Role "assistant" -Content $analysis.explanation
                 }
+
             } else {
+                # Error en la ejecución
                 Write-ColorOutput "`n✗ Error:" $Colors.Error
                 Write-ColorOutput $result.Error $Colors.Error
-                Add-ToHistory -Role "assistant" -Content "Command: $($response.command)`nError: $($result.Error)"
+
+                Add-ToHistory -Role "assistant" -Content @"
+[ERROR] $command
+$($result.Error)
+"@
             }
+
         } else {
-            Add-ToHistory -Role "assistant" -Content $response.explanation
+            # No hay comando, solo respuesta directa
+            if ($response.explanation) {
+                Add-ToHistory -Role "assistant" -Content $response.explanation
+            }
         }
 
-        return $false  # No auto‑continue
     } catch {
-        Write-ColorOutput "`nERROR parsing JSON: $($_.Exception.Message)" $Colors.Error
-        Write-ColorOutput "Response: $JsonResponse" $Colors.Warning
-        return $false
+        Write-ColorOutput "`nERROR parsing response: $($_.Exception.Message)" $Colors.Error
+        if ($script:DebugMode) {
+            Write-ColorOutput "Raw response: $aiResponse" $Colors.Warning
+        }
     }
 }
 
@@ -261,84 +288,46 @@ function Start-IntelligentPowerShell {
     if (-not (Test-Configuration)) { return }
 
     $systemPrompt = @"
-You are an expert PowerShell assistant. Target version: $script:PSVersion
+You are a PowerShell assistant. Your job is simple:
 
-CRITICAL DECISION LOGIC - Apply this pattern to EVERY user request:
+1. User asks a question
+2. You generate ONE PowerShell command to answer it
+3. System executes the command and shows you the output
+4. You explain what the output means
 
-STEP 1: Does answering this question require CURRENT/LIVE data from the system?
-  YES → Execute appropriate PowerShell command to get that data
-  NO → Answer directly from your knowledge
+RESPONSE FORMAT (always JSON):
 
-STEP 2: After getting data (if needed), analyze and explain in your own words
-
-MULTI-STEP WORKFLOW (for requests that need system data):
-
-First Response (getting data):
+When generating a command:
 {
-    "command": "[command to get data]",
-    "explanation": "Getting [data type]... Next: I will analyze and explain [what user asked for]",
-    "continue": true  // IMPORTANT: Set true to trigger automatic second step
+  "command": "the PowerShell command to run",
+  "explanation": "what you're about to do",
+  "safety": "any warnings if needed"
 }
 
-Second Response (analyzing data):
+When analyzing output (you'll receive output from previous command):
 {
-    "command": "",
-    "explanation": "[Detailed analysis of the data received, answering the original question]",
-    "continue": false
+  "command": "",
+  "explanation": "your analysis of the output"
 }
 
-CRITICAL: When you execute a command to gather data, ALWAYS:
-1. Set "continue": true
-2. In explanation, state what you'll do NEXT with the data
-3. Remember the ORIGINAL user question for the next response
+RULES:
+- Generate ONE command per user request
+- After seeing output, explain it clearly
+- If file doesn't exist or command fails, explain that
+- Use proper PowerShell syntax
+- Never apologize excessively, just be helpful
 
-EXAMPLES of this pattern (apply same logic to ANY similar request):
+EXAMPLES:
 
-User: "explain processes running in my session"
-Response 1: { command: "Get-Process", explanation: "Getting process list... Next: I will explain what each process does", continue: true }
-Response 2: { command: "", explanation: "Here's what each process does: chrome.exe is your web browser, powershell.exe is...", continue: false }
+User: "show me txt files"
+You: {"command": "Get-ChildItem *.txt", "explanation": "Listing all .txt files"}
+[System shows output]
+You: {"command": "", "explanation": "Found 3 files: a.txt (5KB), b.txt (2KB), c.txt (empty)"}
 
-User: "explain files in current directory"
-Response 1: { command: "Get-ChildItem", explanation: "Getting directory contents... Next: I will explain each file's purpose", continue: true }
-Response 2: { command: "", explanation: "Based on the files found: script.ps1 is..., data.json contains...", continue: false }
-
-User: "what services are critical"
-Response 1: { command: "Get-Service", explanation: "Getting service list... Next: I will identify critical services", continue: true }
-Response 2: { command: "", explanation: "Critical services include: wuauserv (Windows Update)...", continue: false }
-
-Pattern for conceptual questions (no system data needed):
-User: "how does Get-Process work"
-Response: { command: "", explanation: "Get-Process retrieves information about...", continue: false }
-
-Pattern for actions:
-User: "create file test.txt"
-Response: { command: "New-Item test.txt", explanation: "Creating file test.txt", continue: false }
-
-KEY PRINCIPLES:
-1. When gathering system data, ALWAYS set continue=true and state what you'll do next
-2. In the continuation response, answer the ORIGINAL question using the data
-3. Don't lose track of what the user asked for
-4. Be PROACTIVE - if you need system data, GET IT first
-
-WRONG approaches:
-❌ Getting data but forgetting to analyze it
-❌ Setting continue=false after data gathering command
-❌ Not stating what you'll do next with the data
-
-CORRECT approaches:
-✅ Get data → continue=true → explain what you'll do next
-✅ Receive data → continue=false → analyze and explain thoroughly
-✅ Always remember original user question throughout multi-step flow
-
-Respond ONLY in valid JSON:
-{
-    "command": "PowerShell command (empty if no system data needed)",
-    "explanation": "what you're doing + what's next (if continue=true) OR final analysis (if continue=false)",
-    "safety": "warnings if applicable (empty string if none)",
-    "continue": true/false (true when you need to process data in next step)
-}
-
-Remember: continue=true means "I need another turn to finish answering this question"
+User: "what's in config.json"
+You: {"command": "Get-Content config.json", "explanation": "Reading config.json"}
+[System shows output or error]
+You: {"command": "", "explanation": "The file contains API settings..."}
 "@
 
     Add-ToHistory -Role "system" -Content $systemPrompt
@@ -351,33 +340,32 @@ Remember: continue=true means "I need another turn to finish answering this ques
         if (-not $userInput.Trim()) { continue }
 
         switch -Regex ($userInput.ToLower().Trim()) {
-            "^(exit|quit)$" { Write-ColorOutput "`nGoodbye! 👋" $Colors.Success; return }
-            "^install$" { Install-Configuration; continue }
-            "^history$" { Show-History; continue }
+            "^(exit|quit)$" {
+                Write-ColorOutput "`nGoodbye! 👋`n" $Colors.Success
+                return
+            }
+            "^install$" {
+                Install-Configuration
+                continue
+            }
+            "^history$" {
+                Show-History
+                continue
+            }
+            "^clear$" {
+                $script:ConversationHistory = $script:ConversationHistory | Where-Object { $_.role -eq "system" }
+                Write-ColorOutput "`n✓ History cleared`n" $Colors.Success
+                continue
+            }
             "^debug$" {
                 $script:DebugMode = -not $script:DebugMode
-                Write-ColorOutput "`nDebug mode $(if($script:DebugMode){'enabled'}else{'disabled'})" $Colors.Warning
+                Write-ColorOutput "`nDebug mode $(if($script:DebugMode){'enabled'}else{'disabled'})`n" $Colors.Warning
                 continue
             }
         }
 
         Add-ToHistory -Role "user" -Content $userInput
-
-        # Loop for multi-step operations
-        $shouldContinue = $true
-        while ($shouldContinue) {
-            Write-ColorOutput "`n🤖 Processing..." $Colors.AI
-            $aiResponse = Invoke-OpenAIChat
-
-            if ($aiResponse) {
-                $shouldContinue = Process-AIResponse -JsonResponse $aiResponse
-            } else {
-                Write-ColorOutput "`nCould not get AI response. Try again." $Colors.Error
-                $script:ConversationHistory = $script:ConversationHistory[0..($script:ConversationHistory.Count - 2)]
-                $shouldContinue = $false
-            }
-        }
-
+        Process-UserQuery -UserInput $userInput
         Write-Host ""
     }
 }
