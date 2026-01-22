@@ -56,32 +56,21 @@
 				border-radius: 12px;
 				margin-left: 0.5rem;
 			}
-			.speed-indicator {
-				font-size: 0.85em;
-				color: #888;
-				padding-left: 1em;
+			.model-dropdown{
+				position:absolute;
+				max-height:200px;
+				overflow-y:auto;
+				z-index:1000;
+				border:1px solid #ccc;
+				background:white;
+				margin-top:2px;
+				display:none;
 			}
-			code,
-			pre {
-				font-family: 'Fira Mono', 'Consolas', monospace;
-				background: #f1f3f5;
-				border-radius: 4px;
-				padding: 2px 6px;
-			}
-			.settings-panel {
-				display: none;
-				border-bottom: 1px solid #eee;
-				padding: 16px;
-				background: #f7f7f7;
-			}
-			.settings-panel.show {
-				display: block;
-			}
-			@media (max-width: 600px) {
-				header { flex-wrap: wrap; gap: 5px; }
-				#headerTitle { width: 100%; }
-				.chat-id-tag { display: none; }
-			}
+			.model-option{padding:8px;cursor:pointer;}
+			.speed-indicator{font-size:0.85em;color:#888;padding-left:1em;}
+			code,pre{font-family:'Fira Mono','Consolas',monospace;background:#f1f3f5;border-radius:4px;padding:2px 6px;}
+			.settings-panel{display:none;border-bottom:1px solid #eee;padding:16px;background:#f7f7f7;}.settings-panel.show{display:block;}
+			@media (max-width:600px){header{flex-wrap:wrap;gap:5px;}#headerTitle{width:100%;}.chat-id-tag{display:none;}}
 		</style>
 	</head>
 
@@ -138,7 +127,8 @@
 					</div>
 					<div class="mb-2">
 						<label class="form-label">Model</label>
-						<input type="text" class="form-control" id="model" required />
+						<input type="text" class="form-control" id="model" required autocomplete="off" />
+						<div id="modelDropdown" class="model-dropdown"></div>
 					</div>
 					<div class="mb-2">
 						<label class="form-label">System prompt</label>
@@ -204,6 +194,7 @@
 			const urlBaseInput = document.getElementById('urlBase');
 			const apiKeyInput = document.getElementById('apiKey');
 			const modelInput = document.getElementById('model');
+			const modelDropdown = document.getElementById('modelDropdown');
 			const systemPromptInput = document.getElementById('systemPrompt');
 			const chatMessages = document.getElementById('chatMessages');
 			const chatForm = document.getElementById('chatForm');
@@ -245,6 +236,36 @@
 
 			settingsToggle.onclick = () => settingsPanel.classList.toggle('show');
 
+			const loadModels = async () => {
+				const e = urlBaseInput.value.trim(), k = apiKeyInput.value.trim();
+				if (!e || !k) return;
+				let b = e.replace(/\/chat\/completions$/, '').replace(/\/v1$/, '');if (!b.includes('/v1')) b += '/v1';
+				const r = await fetch(`${b}/models`, {headers: {'Authorization': `Bearer ${k}`, 'Content-Type': 'application/json'}});
+				const d = await r.json(), m = d.data || d.models || [];
+				modelDropdown.innerHTML = '';
+				m.forEach(model => {
+					const opt = Object.assign(document.createElement('div'), {
+						textContent: model.id || model.name || model,
+						className: 'model-option',
+						onclick: () => {modelInput.value = model.id || model.name || model;modelDropdown.style.display = 'none';}
+					});
+					modelDropdown.appendChild(opt);
+				});
+				const {bottom, left, width} = modelInput.getBoundingClientRect();
+				Object.assign(modelDropdown.style, {
+					display: 'block',
+					top: `${bottom + window.scrollY}px`,
+					left: `${left + window.scrollX}px`,
+					width: `${width}px`
+				});
+			};
+
+			modelInput.addEventListener('click', loadModels);
+
+			modelInput.addEventListener('blur', () => {
+				setTimeout(() => modelDropdown.style.display = 'none', 150);
+			});
+
 			settingsForm.onsubmit = e => {
 				e.preventDefault();
 				save(configKey, {
@@ -266,13 +287,12 @@
 
 			const renderMarkdown = text => marked.parse(text);
 			const addMessage = (content, sender) => {
-				let h = '';
-				if (Array.isArray(content)) {
-					content.forEach(c => {
-						if (c.type === 'text') h += (sender === 'openai' ? renderMarkdown(c.text) : c.text);
-						if (c.type === 'image_url') h += `<img src="${c.image_url.url}" style="max-width:100%;max-height:300px;display:block;margin-top:5px;border-radius:8px">`;
-					});
-				} else { h = sender === 'openai' ? renderMarkdown(content) : content; }
+				const h = Array.isArray(content)
+					? content.reduce((acc, c) =>
+						c.type === 'text'
+							? acc + (sender === 'openai' ? renderMarkdown(c.text) : c.text)
+							: acc + `<img src="${c.image_url.url}" style="max-width:100%;max-height:300px;display:block;margin-top:5px;border-radius:8px">`, '')
+					: sender === 'openai' ? renderMarkdown(content) : content;
 				chatMessages.insertAdjacentHTML('beforeend', `<div class="message ${sender}"><span>${h}</span></div>`);
 				chatMessages.lastChild.scrollIntoView({ block: 'end' });
 			};
@@ -301,9 +321,7 @@
 							const d = l.slice(5).trim();
 							if (d === '[DONE]') return onDone(text, tokens, (performance.now() - start) / 1000);
 							const delta = JSON.parse(d).choices[0]?.delta?.content;
-							if (!delta) continue;
-							text += delta; tokens++;
-							onChunk(text, tokens, (performance.now() - start) / 1000);
+							if (delta) { text += delta; tokens++; onChunk(text, tokens, (performance.now() - start) / 1000); }
 						}
 					}
 				} catch { onError?.(); }
