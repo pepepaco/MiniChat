@@ -1,0 +1,33 @@
+{
+ "semi": false,
+ "singleQuote": true,
+ "trailingComma": "none",
+ "tabWidth": 1,
+ "useTabs": false,
+ "printWidth": 10000,
+ "bracketSpacing": false,
+ "arrowParens": "avoid",
+ "endOfLine": "lf",
+ "proseWrap": "never",
+ "htmlWhitespaceSensitivity": "ignore",
+ "overrides": [
+  {
+   "files": "*.html",
+   "options": {
+    "printWidth": 10000,
+    "tabWidth": 1,
+    "semi": false,
+    "singleQuote": true
+   }
+  },
+  {
+   "files": "*.js",
+   "options": {
+    "printWidth": 10000,
+    "tabWidth": 1,
+    "semi": false,
+    "singleQuote": true
+   }
+  }
+ ]
+}
