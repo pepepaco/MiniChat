@@ -218,7 +218,7 @@
 
 			const savedTitle=localStorage.getItem(`chatTitle-${chatId}`);if(savedTitle){document.title=savedTitle;headerTitle.innerHTML=`${savedTitle}<small class="text-secondary">Streaming Markdown</small><span class="chat-id-tag">${chatId}</span>`}
 			newChatBtn.onclick=()=>{const nid=crypto.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2,8);save(`chatConfig-${nid}`,{urlBase:urlBaseInput.value.trim(),apiKey:apiKeyInput.value.trim(),model:modelInput.value.trim(),systemPrompt:systemPromptInput.value.trim()});window.open(`?chat=${nid}`,'_blank')};
-			Object.keys(localStorage).filter(k=>k.startsWith('chatTitle-')).forEach(k=>{const id=k.slice(10),t=localStorage.getItem(k)||'Untitled';load(`chatConfig-${id}`).then(c=>{const m=c?.model||'';chatHistorySelect.insertAdjacentHTML('beforeend',`<option value="${id}">${t}(${m})</option>`)})});
+			const chatIds=new Set();Object.keys(localStorage).forEach(k=>{if(k.startsWith('chatHistory-'))chatIds.add(k.slice(12));if(k.startsWith('chatTitle-'))chatIds.add(k.slice(10));if(k.startsWith('chatConfig-'))chatIds.add(k.slice(11))});Array.from(chatIds).forEach(id=>{const t=localStorage.getItem(`chatTitle-${id}`)||'Untitled';load(`chatConfig-${id}`).then(c=>{const m=c?.model||'';chatHistorySelect.insertAdjacentHTML('beforeend',`<option value="${id}">${t}(${m})</option>`)})});
 			chatHistorySelect.onchange=e=>{if(e.target.value)location.search='?chat='+e.target.value};
 			userInput.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chatForm.requestSubmit()}};
 		</script>
