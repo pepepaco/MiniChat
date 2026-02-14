@@ -272,7 +272,10 @@
     const userMsg = imgRef ? {role: 'user', content: [{type: 'text', text: t || 'Analyze image'}, {type: 'image_url', image_url: {url: imgRef}}]} : {role: 'user', content: t},
      displayContent = imgData ? [{type: 'text', text: t || 'Analyze image'}, {type: 'image_url', image_url: {url: imgData}}] : t;
     addMessage(displayContent, 'user');
-    userInput.value = ''; imagePreview.style.display = 'none'; imgPreview.src = '';
+    userInput.value = '';
+    // BUGFIX: Resetear estado de imagen INMEDIATAMENTE después de enviar
+    imgPreview.src = ''; // Limpiar src de la imagen
+    imagePreview.style.display = 'none'; // Ocultar preview
     conversation.push(userMsg); await saveConversation();
     const cfg = await load(configKey) || {}, conv = await prepareConversation();
     const rid = `r${++msgCnt}`; addMessage(`<span id="${rid}"></span>`, 'openai');
