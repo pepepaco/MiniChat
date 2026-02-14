@@ -1,226 +1,444 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-	<head>
-		<meta charset="UTF-8" />
-		<title>OpenAI Chat Streaming - Markdown</title>
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<link
-			href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-			rel="stylesheet"
-		/>
-		<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-		<style>
-			html,
-			body {
-				height: 100%;
-				width: 100%;
-				margin: 0;
-				padding: 0;
-				background: #f8f9fa;
-			}
-			.chat-window {
-				height: 100vh;
-				display: flex;
-				flex-direction: column;
-				background: #fff;
-			}
-			.chat-messages {
-				flex: 1;
-				overflow-y: auto;
-				padding: 1rem;
-				border-bottom: 1px solid #eee;
-				scroll-behavior: smooth;
-			}
-			.message span {
-				display: inline-block;
-				padding: 0.5rem 0.75rem;
-				border-radius: 1rem;
-				margin: 0.375rem 0;
-				max-width: 80%;
-				word-break: break-word;
-			}
-			.message.user span {
-				background: #0d6efd;
-				color: #fff;
-			}
-			.message.openai span {
-				background: #e9ecef;
-				color: #333;
-			}
-			.chat-id-tag {
-				font-size: 0.75rem;
-				color: #888;
-				font-family: monospace;
-				background: #eee;
-				padding: 2px 7px;
-				border-radius: 12px;
-				margin-left: 0.5rem;
-			}
-			.model-dropdown{
-				position:absolute;
-				max-height:200px;
-				overflow-y:auto;
-				z-index:1000;
-				border:1px solid #ccc;
-				background:white;
-				margin-top:2px;
-				display:none;
-			}
-			.model-option{padding:8px;cursor:pointer;}
-			.speed-indicator{font-size:0.85em;color:#888;padding-left:1em;}
-			code,pre{font-family:'Fira Mono','Consolas',monospace;background:#f1f3f5;border-radius:4px;padding:2px 6px;}
-			.settings-panel{display:none;border-bottom:1px solid #eee;padding:16px;background:#f7f7f7;}.settings-panel.show{display:block;}
-			@media (max-width:600px){header{flex-wrap:wrap;gap:5px;}#headerTitle{width:100%;}.chat-id-tag{display:none;}}
-		</style>
-	</head>
+ <head>
+  <meta charset="UTF-8" />
+  <title>OpenAI Chat Streaming - Markdown</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+   html,
+   body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: #f8f9fa;
+   }
+   .chat-window {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+   }
+   .chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    border-bottom: 1px solid #eee;
+    scroll-behavior: smooth;
+   }
+   .message span {
+    display: inline-block;
+    padding: 0.5rem 0.75rem;
+    border-radius: 1rem;
+    margin: 0.375rem 0;
+    max-width: 80%;
+    word-break: break-word;
+    white-space: pre-wrap;
+   }
+   .message.user span {
+    background: #0d6efd;
+    color: #fff;
+   }
+   .message.openai span {
+    background: #e9ecef;
+    color: #333;
+   }
+   .chat-id-tag {
+    font-size: 0.75rem;
+    color: #888;
+    font-family: monospace;
+    background: #eee;
+    padding: 2px 7px;
+    border-radius: 12px;
+    margin-left: 0.5rem;
+   }
 
-	<body>
-		<div class="chat-window">
-			<header
-				class="p-3 border-bottom d-flex align-items-center justify-content-between"
-			>
-				<span class="fw-bold" id="headerTitle">
-					Chat OpenAI <small class="text-secondary">Streaming Markdown</small>
-					<span
-						id="chatIdTag"
-						class="chat-id-tag"
-						title="Conversation ID"
-					></span>
-				</span>
-				<div class="d-flex align-items-center">
-					<select
-						id="chatHistorySelect"
-						class="form-select form-select-sm me-2"
-						style="width: auto"
-					>
-						<option value="">Historial...</option>
-					</select>
-					<!-- Botón con estilo Bootstrap -->
-					<button
-						class="btn btn-success btn-sm me-2"
-						id="newChatBtn"
-						title="New Chat"
-					>
-						New chat
-					</button>
-					<button
-						class="btn btn-secondary btn-sm me-2"
-						id="generateTitleBtn"
-						title="Generate title"
-					>
-						Generate title
-					</button>
-					<span class="settings-toggle" id="settingsToggle" title="Settings"
-						>&#9881;</span
-					>
-				</div>
-			</header>
-			<section class="settings-panel" id="settingsPanel">
-				<form id="settingsForm" autocomplete="on">
-					<div class="mb-2">
-						<label class="form-label">Base URL (up to /v1)</label>
-						<input type="text" class="form-control" id="urlBase" required />
-					</div>
-					<div class="mb-2">
-						<label class="form-label">API Key</label>
-						<input type="text" class="form-control" id="apiKey" required />
-					</div>
-					<div class="mb-2">
-						<label class="form-label">Model</label>
-						<input type="text" class="form-control" id="model" required autocomplete="off" />
-						<div id="modelDropdown" class="model-dropdown"></div>
-					</div>
-					<div class="mb-2">
-						<label class="form-label">System prompt</label>
-						<textarea
-							class="form-control"
-							id="systemPrompt"
-							rows="2"
-							placeholder="Example: You are a helpful and concise assistant."
-						></textarea>
-						<small class="text-secondary">Controls AI behavior.</small>
-					</div>
-					<button type="submit" class="btn btn-primary btn-sm w-100">
-						Save settings
-					</button>
-				</form>
-			</section>
-			<main class="chat-messages" id="chatMessages"></main>
-			<div id="imagePreview" class="px-3 pb-2" style="display:none">
-				<div class="position-relative d-inline-block">
-					<img id="imgPreview" style="max-height:100px;border-radius:8px">
-					<button type="button" class="btn-close position-absolute top-0 start-100 translate-middle bg-white border rounded-circle" id="clearImg" style="padding: 5px;"></button>
-				</div>
-			</div>
-			<form class="d-flex p-3 gap-2" id="chatForm" autocomplete="off">
-				<input type="file" id="imageInput" accept="image/*" style="display:none">
-				<button class="btn btn-outline-secondary btn-sm" type="button" id="imageBtn" title="Upload Image" style="padding: 2px 6px; font-size: 0.85rem;">📎</button>
-				<textarea
-					class="form-control flex-grow-1"
-					id="userInput"
-					placeholder="Type your message..."
-					required
-					rows="2"
-					style="resize: vertical"
-				></textarea>
-				<button class="btn btn-primary flex-shrink-0" type="submit">
-					Send
-				</button>
-			</form>
-		</div>
-		<script type="module">
-			// IndexedDB helpers
-			const DB='m',V=2,openDB=()=>new Promise((y,n)=>{const r=indexedDB.open(DB,V);r.onsuccess=()=>y(r.result);r.onupgradeneeded=()=>{const d=r.result;['data','imgs'].forEach(s=>d.objectStoreNames.contains(s)||d.createObjectStore(s))};r.onerror=()=>n(r.error)}),
-			dbAction=async(s,mode,action,k,v,parseJson)=>{const d=await openDB(),t=d.transaction(s,mode),o=t.objectStore(s);return new Promise((y,n)=>{const r=action==='put'?o.put(v,k):action==='get'?o.get(k):o.delete(k);r.onsuccess=()=>y(action==='get'?parseJson&&r.result?JSON.parse(r.result):r.result||null:r.result||null);r.onerror=()=>n(r.error)})},
-			save=(k,v)=>dbAction('data','readwrite','put',k,JSON.stringify(v),!1),load=k=>dbAction('data','readonly','get',k,null,!0),saveImg=(i,d)=>dbAction('imgs','readwrite','put',i,d,!1),loadImg=i=>dbAction('imgs','readonly','get',i,null,!1),deleteImg=i=>dbAction('imgs','readwrite','delete',i,null,!1)
 
-			const chatId=(()=>{const p=new URLSearchParams(location.search);let c=p.get('chat');if(!c){c=crypto.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2,8);p.set('chat',c);history.replaceState(null,'','?'+p)}return c})();
-			document.getElementById('chatIdTag').textContent=chatId
+   code,
+   pre {
+    font-family: 'Fira Mono', 'Consolas', monospace;
+    background: #f1f3f5;
+    border-radius: 4px;
+    padding: 2px 6px;
+   }
+   .settings-panel {
+    display: none;
+    border-bottom: 1px solid #eee;
+    padding: 16px;
+    background: #f7f7f7;
+   }
+   .settings-panel.show {
+    display: block;
+   }
+   @media (max-width: 600px) {
+    header {
+     flex-wrap: wrap;
+     gap: 5px;
+    }
+    #headerTitle {
+     width: 100%;
+    }
+    .chat-id-tag {
+     display: none;
+    }
+   }
+  </style>
+ </head>
 
-			const $=id=>document.getElementById(id),
-				settingsPanel=$('settingsPanel'),settingsToggle=$('settingsToggle'),settingsForm=$('settingsForm'),
-				urlBaseInput=$('urlBase'),apiKeyInput=$('apiKey'),modelInput=$('model'),modelDropdown=$('modelDropdown'),
-				systemPromptInput=$('systemPrompt'),chatMessages=$('chatMessages'),chatForm=$('chatForm'),userInput=$('userInput'),
-				newChatBtn=$('newChatBtn'),generateTitleBtn=$('generateTitleBtn'),headerTitle=$('headerTitle'),chatHistorySelect=$('chatHistorySelect'),
-				imageInput=$('imageInput'),imageBtn=$('imageBtn'),imagePreview=$('imagePreview'),imgPreview=$('imgPreview'),clearImg=$('clearImg');
+ <body>
+  <div class="chat-window">
+   <header class="p-3 border-bottom d-flex align-items-center justify-content-between">
+    <span class="fw-bold" id="headerTitle">
+     Chat OpenAI
+     <small class="text-secondary">Streaming Markdown</small>
+     <span id="chatIdTag" class="chat-id-tag" title="Conversation ID"></span>
+    </span>
+    <div class="d-flex align-items-center">
+     <select id="chatHistorySelect" class="form-select form-select-sm me-2" style="width: auto">
+      <option value="">Historial...</option>
+     </select>
+     <button class="btn btn-success btn-sm me-2" id="newChatBtn" title="New Chat">New chat</button>
+     <button class="btn btn-secondary btn-sm me-2" id="generateTitleBtn" title="Generate title">Generate title</button>
+     <span class="settings-toggle" id="settingsToggle" title="Settings">&#9881;</span>
+    </div>
+   </header>
+   <section class="settings-panel" id="settingsPanel">
+    <form id="settingsForm" autocomplete="on">
+     <div class="mb-2">
+      <label class="form-label">Base URL (up to /v1)</label>
+      <input type="text" class="form-control" id="urlBase" required />
+     </div>
+     <div class="mb-2">
+      <label class="form-label">API Key</label>
+      <input type="text" class="form-control" id="apiKey" required />
+     </div>
+     <div class="mb-2">
+      <label class="form-label">Model</label>
+      <input type="text" class="form-control" id="model" required />
 
-			imageBtn.onclick=()=>imageInput.click();
-			imageInput.onchange=()=>{const f=imageInput.files[0];if(f){const r=new FileReader();r.onload=e=>{imgPreview.src=e.target.result;imagePreview.style.display='block'};r.readAsDataURL(f)}};
-			clearImg.onclick=()=>{imageInput.value='';imagePreview.style.display='none'};
+     </div>
+     <div class="mb-2">
+      <label class="form-label">System prompt</label>
+      <textarea class="form-control" id="systemPrompt" rows="2" placeholder="Example: You are a helpful and concise assistant."></textarea>
+      <small class="text-secondary">Controls AI behavior.</small>
+     </div>
+     <button type="submit" class="btn btn-primary btn-sm w-100">Save settings</button>
+    </form>
+   </section>
+   <main class="chat-messages" id="chatMessages"></main>
+   <div id="imagePreview" class="px-3 pb-2" style="display: none">
+    <div class="position-relative d-inline-block">
+     <img id="imgPreview" style="max-height: 100px; border-radius: 8px" />
+     <button type="button" class="btn-close position-absolute top-0 start-100 translate-middle bg-white border rounded-circle" id="clearImg" style="padding: 5px"></button>
+    </div>
+   </div>
+   <form class="d-flex p-3 gap-2" id="chatForm" autocomplete="off">
+    <input type="file" id="imageInput" accept="image/*" style="display: none" />
+    <button class="btn btn-outline-secondary btn-sm" type="button" id="imageBtn" title="Upload Image" style="padding: 2px 6px; font-size: 0.85rem">📎</button>
+    <textarea class="form-control flex-grow-1" id="userInput" placeholder="Type your message..." required rows="2" style="resize: vertical"></textarea>
+    <button class="btn btn-primary flex-shrink-0" type="submit">Send</button>
+   </form>
+  </div>
+  <script type="module">
+   // IndexedDB helpers
+   const DB = 'm',
+    V = 2,
+    openDB = () =>
+     new Promise((y, n) => {
+      const r = indexedDB.open(DB, V)
+      r.onsuccess = () => y(r.result)
+      r.onupgradeneeded = () => {
+       const d = r.result
+       ;['data', 'imgs'].forEach(s => d.objectStoreNames.contains(s) || d.createObjectStore(s))
+      }
+      r.onerror = () => n(r.error)
+     }),
+    dbAction = async (s, mode, action, k, v, parseJson) => {
+     const d = await openDB(),
+      t = d.transaction(s, mode),
+      o = t.objectStore(s)
+     return new Promise((y, n) => {
+      const r = action === 'put' ? o.put(v, k) : action === 'get' ? o.get(k) : o.delete(k)
+      r.onsuccess = () => y(action === 'get' ? (parseJson && r.result ? JSON.parse(r.result) : r.result || null) : r.result || null)
+      r.onerror = () => n(r.error)
+     })
+    },
+    save = (k, v) => dbAction('data', 'readwrite', 'put', k, JSON.stringify(v), !1),
+    load = k => dbAction('data', 'readonly', 'get', k, null, !0),
+    saveImg = (i, d) => dbAction('imgs', 'readwrite', 'put', i, d, !1),
+    loadImg = i => dbAction('imgs', 'readonly', 'get', i, null, !1),
+    deleteImg = i => dbAction('imgs', 'readwrite', 'delete', i, null, !1)
 
-			let isSettingTitle=false;
-			const SET_TITLE_PROMPT='--set-title: Generate a very short (max 5 words) and concise title for this conversation. Respond only with the title, no other text.';
-			generateTitleBtn.onclick=()=>{userInput.value=SET_TITLE_PROMPT;userInput.focus()};
+   const chatId = (() => {
+    const p = new URLSearchParams(location.search)
+    let c = p.get('chat')
+    if (!c) {
+     c = crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+     p.set('chat', c)
+     history.replaceState(null, '', '?' + p)
+    }
+    return c
+   })()
+   document.getElementById('chatIdTag').textContent = chatId
 
-			const configKey=`chatConfig-${chatId}`,
-				loadConfig=async()=>{const c=(await load(configKey))??{};urlBaseInput.value=c.urlBase??'https://api.openai.com/v1';apiKeyInput.value=c.apiKey??'';modelInput.value=c.model??'gpt-4o-mini';systemPromptInput.value=c.systemPrompt??''};
-			loadConfig();
-			settingsToggle.onclick=()=>settingsPanel.classList.toggle('show');
+   const $ = id => document.getElementById(id),
+    settingsPanel = $('settingsPanel'),
+    settingsToggle = $('settingsToggle'),
+    settingsForm = $('settingsForm'),
+    urlBaseInput = $('urlBase'),
+    apiKeyInput = $('apiKey'),
+    modelInput = $('model'),
 
-			const loadModels=async()=>{const e=urlBaseInput.value.trim(),k=apiKeyInput.value.trim();if(!e||!k)return;let b=e.replace(/\/chat\/completions$/,'').replace(/\/v1$/,'');if(!b.includes('/v1'))b+='/v1';const r=await fetch(`${b}/models`,{headers:{Authorization:`Bearer ${k}`,'Content-Type':'application/json'}}),d=await r.json(),m=d.data||d.models||[];modelDropdown.innerHTML='';m.forEach(o=>{const el=Object.assign(document.createElement('div'),{textContent:o.id||o.name||o,className:'model-option',onclick:()=>{modelInput.value=o.id||o.name||o;modelDropdown.style.display='none'}});modelDropdown.appendChild(el)});const{bottom,left,width}=modelInput.getBoundingClientRect();Object.assign(modelDropdown.style,{display:'block',top:`${bottom+window.scrollY}px`,left:`${left+window.scrollX}px`,width:`${width}px`})};
-			modelInput.addEventListener('click',loadModels);
-			modelInput.addEventListener('blur',()=>setTimeout(()=>modelDropdown.style.display='none',150));
-			settingsForm.onsubmit=e=>{e.preventDefault();save(configKey,{urlBase:urlBaseInput.value.trim(),apiKey:apiKeyInput.value.trim(),model:modelInput.value.trim(),systemPrompt:systemPromptInput.value.trim()});settingsPanel.classList.remove('show')};
+    systemPromptInput = $('systemPrompt'),
+    chatMessages = $('chatMessages'),
+    chatForm = $('chatForm'),
+    userInput = $('userInput'),
+    newChatBtn = $('newChatBtn'),
+    generateTitleBtn = $('generateTitleBtn'),
+    headerTitle = $('headerTitle'),
+    chatHistorySelect = $('chatHistorySelect'),
+    imageInput = $('imageInput'),
+    imageBtn = $('imageBtn'),
+    imagePreview = $('imagePreview'),
+    imgPreview = $('imgPreview'),
+    clearImg = $('clearImg')
 
-			let conversation=[];
-			const saveConversation=()=>save(`chatHistory-${chatId}`,conversation),
-				renderMarkdown=t=>marked.parse(t),
-				addMessage=(c,s)=>{const h=Array.isArray(c)?c.reduce((a,x)=>x.type==='text'?a+(s==='openai'?renderMarkdown(x.text):x.text):a+`<img src="${x.image_url.url}" style="max-width:100%;max-height:300px;display:block;margin-top:5px;border-radius:8px">`,''):s==='openai'?renderMarkdown(c):c;chatMessages.insertAdjacentHTML('beforeend',`<div class="message ${s}"><span>${h}</span></div>`);chatMessages.lastChild.scrollIntoView({block:'end'})},
-				restoreHistory=async()=>{conversation=(await load(`chatHistory-${chatId}`))??[];chatMessages.innerHTML='';for(const m of conversation){let d=m.content;if(Array.isArray(d)){d=[];for(const x of m.content)if(x.type==='image_url'&&x.image_url?.url?.startsWith('imgref:')){const i=await loadImg(x.image_url.url.slice(7));if(i)d.push({type:'image_url',image_url:{url:i}})}else d.push(x)}addMessage(d,m.role==='user'?'user':'openai')}};
-			await restoreHistory()
+   imageBtn.onclick = () => imageInput.click()
+   imageInput.onchange = () => {
+    const f = imageInput.files[0]
+    if (f) {
+     const r = new FileReader()
+     r.onload = e => {
+      const i = new Image()
+      i.onload = () => {
+       const c = document.createElement('canvas'),
+        s = Math.min(1, 1024 / Math.max(i.width, i.height))
+       c.width = i.width * s
+       c.height = i.height * s
+       c.getContext('2d').drawImage(i, 0, 0, c.width, c.height)
+       imgPreview.src = c.toDataURL('image/jpeg', 0.5)
+       imagePreview.style.display = 'block'
+      }
+      i.src = e.target.result
+     }
+     r.readAsDataURL(f)
+    }
+   }
+   clearImg.onclick = () => {
+    imageInput.value = ''
+    imagePreview.style.display = 'none'
+   }
 
-			const streamOpenAI=async({urlBase,apiKey,model,conversation,onChunk,onDone,onError})=>{const start=performance.now();let text='',tokens=0;try{const res=await fetch(`${urlBase}/chat/completions`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${apiKey}`},body:JSON.stringify({model,messages:conversation,stream:true})}),reader=res.body.getReader(),decoder=new TextDecoder();let buf='';while(1){const{value,done}=await reader.read();if(done)break;buf+=decoder.decode(value,{stream:true});const lines=buf.split('\n');buf=lines.pop();for(const l of lines){if(!l.trim().startsWith('data:'))continue;const d=l.slice(5).trim();if(d==='[DONE]')return onDone(text,tokens,(performance.now()-start)/1e3);const delta=JSON.parse(d).choices[0]?.delta?.content;if(delta){text+=delta;tokens++;onChunk(text,tokens,(performance.now()-start)/1e3)}}}}catch{onError?.()}};
+   let isSettingTitle = false
+   const SET_TITLE_PROMPT = '--set-title: Generate a very short (max 5 words) and concise title for this conversation. Respond only with the title, no other text.'
+   generateTitleBtn.onclick = () => {
+    userInput.value = SET_TITLE_PROMPT
+    userInput.focus()
+   }
 
-			const prepareConversation=async c=>{const s=c.systemPrompt?.trim(),b=[];for(const m of conversation)if(Array.isArray(m.content)){const e=[];for(const x of m.content)if(x.type==='image_url'&&x.image_url?.url?.startsWith('imgref:')){const i=await loadImg(x.image_url.url.slice(7));if(i)e.push({type:'image_url',image_url:{url:i}})}else e.push(x);b.push({...m,content:e})}else b.push({...m});return s&&b[0]?.role!=='system'?[{role:'system',content:s},...b]:b};
+   const configKey = `chatConfig-${chatId}`,
+    loadConfig = async () => {
+     const c = (await load(configKey)) ?? {}
+     urlBaseInput.value = c.urlBase ?? 'https://api.openai.com/v1'
+     apiKeyInput.value = c.apiKey ?? ''
+     modelInput.value = c.model ?? 'gpt-4o-mini'
+     systemPromptInput.value = c.systemPrompt ?? ''
+    }
+   loadConfig()
+   settingsToggle.onclick = () => settingsPanel.classList.toggle('show')
 
-			let msgCnt=0,curImgId=null;
-			chatForm.onsubmit=async e=>{e.preventDefault();const t=userInput.value.trim();if(!t&&!imageInput.files[0])return;isSettingTitle=t.startsWith('--set-title');let imgRef=null,imgData=null;if(imageInput.files[0]){imgData=imgPreview.src;curImgId='img-'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);await saveImg(curImgId,imgData);imgRef='imgref:'+curImgId}const userMsg=imgRef?{role:'user',content:[{type:'text',text:t||'Analyze this image'},{type:'image_url',image_url:{url:imgRef}}]}:{role:'user',content:t},displayContent=imgData?[{type:'text',text:t||'Analyze this image'},{type:'image_url',image_url:{url:imgData}}]:t;addMessage(displayContent,'user');userInput.value='';imageInput.value='';imagePreview.style.display='none';const cfg=(await load(configKey))??{};conversation.push(userMsg);await saveConversation();const conv=await prepareConversation(cfg);msgCnt++;const rid=`r${msgCnt}`,sid=`s${msgCnt}`;addMessage(`<span id="${rid}"></span><br><small id="${sid}" class="speed-indicator"></small>`,'openai');const rEl=$(rid),sEl=$(sid),mDiv=chatMessages.lastChild;await streamOpenAI({urlBase:cfg.urlBase??'https://api.openai.com/v1',apiKey:cfg.apiKey??'',model:cfg.model??'gpt-4o-mini',conversation:conv,onChunk:(c,tk,se)=>{if(tk%10===0||tk===1)rEl.innerHTML=renderMarkdown(c);if(tk>0)sEl.innerText=`Tokens:${tk}•Speed:${(tk/(se||1)).toFixed(2)}t/s`;mDiv.scrollIntoView({block:'end'})},onDone:async(c,tk,se)=>{if(c){conversation.push({role:'assistant',content:c});await saveConversation()}rEl.innerHTML=renderMarkdown(c);sEl.innerText=`Done.${tk}tok,${(tk/(se||1)).toFixed(2)}t/s`;if(isSettingTitle){const ti=(c||'').trim().replace(/\r?\n/g,' ').replace(/[^\p{L}\p{N}\p{Extended_Pictographic} \-]/gu,'').trim().slice(0,50)||'New Chat';document.title=ti;headerTitle.innerHTML=`${ti}<small class="text-secondary">Streaming Markdown</small><span class="chat-id-tag">${chatId}</span>`;localStorage.setItem(`chatTitle-${chatId}`,ti);isSettingTitle=false}},onError:()=>{chatMessages.lastChild.remove();addMessage('Connection error (streaming failed).','openai')}})};
+   settingsForm.onsubmit = e => {
+    e.preventDefault()
+    save(configKey, {urlBase: urlBaseInput.value.trim(), apiKey: apiKeyInput.value.trim(), model: modelInput.value.trim(), systemPrompt: systemPromptInput.value.trim()})
+    settingsPanel.classList.remove('show')
+   }
 
-			const savedTitle=localStorage.getItem(`chatTitle-${chatId}`);if(savedTitle){document.title=savedTitle;headerTitle.innerHTML=`${savedTitle}<small class="text-secondary">Streaming Markdown</small><span class="chat-id-tag">${chatId}</span>`}
-			newChatBtn.onclick=()=>{const nid=crypto.randomUUID?.()||Date.now().toString(36)+Math.random().toString(36).slice(2,8);save(`chatConfig-${nid}`,{urlBase:urlBaseInput.value.trim(),apiKey:apiKeyInput.value.trim(),model:modelInput.value.trim(),systemPrompt:systemPromptInput.value.trim()});window.open(`?chat=${nid}`,'_blank')};
-			const chatIds=new Set();Object.keys(localStorage).forEach(k=>{if(k.startsWith('chatHistory-'))chatIds.add(k.slice(12));if(k.startsWith('chatTitle-'))chatIds.add(k.slice(10));if(k.startsWith('chatConfig-'))chatIds.add(k.slice(11))});Array.from(chatIds).forEach(id=>{const t=localStorage.getItem(`chatTitle-${id}`)||'Untitled';load(`chatConfig-${id}`).then(c=>{const m=c?.model||'';chatHistorySelect.insertAdjacentHTML('beforeend',`<option value="${id}">${t}(${m})</option>`)})});
-			chatHistorySelect.onchange=e=>{if(e.target.value)location.search='?chat='+e.target.value};
-			userInput.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();chatForm.requestSubmit()}};
-		</script>
-	</body>
+   let conversation = []
+   const saveConversation = () => save(`chatHistory-${chatId}`, conversation),
+    renderMarkdown = t => marked.parse(t),
+    addMessage = (c, s) => {
+     const h = Array.isArray(c) ? c.reduce((a, x) => (x.type === 'text' ? a + (s === 'openai' ? renderMarkdown(x.text) : x.text) : a + `<img src="${x.image_url.url}" style="max-width:100%;max-height:300px;display:block;margin-top:5px;border-radius:8px">`), '') : s === 'openai' ? renderMarkdown(c) : c
+     chatMessages.insertAdjacentHTML('beforeend', `<div class="message ${s}"><span>${h}</span></div>`)
+     chatMessages.lastChild.scrollIntoView({block: 'end'})
+    },
+    restoreHistory = async () => {
+     conversation = (await load(`chatHistory-${chatId}`)) ?? []
+     chatMessages.innerHTML = ''
+     for (const m of conversation) {
+      let d = m.content
+      if (Array.isArray(d)) {
+       d = []
+       for (const x of m.content)
+        if (x.type === 'image_url' && x.image_url?.url?.startsWith('imgref:')) {
+         const i = await loadImg(x.image_url.url.slice(7))
+         if (i) d.push({type: 'image_url', image_url: {url: i}})
+        } else d.push(x)
+      }
+      addMessage(d, m.role === 'user' ? 'user' : 'openai')
+     }
+    }
+   await restoreHistory()
+
+   const streamOpenAI = async ({urlBase, apiKey, model, conversation, onChunk, onDone, onError}) => {
+    let text = ''
+    try {
+     const res = await fetch(`${urlBase}/chat/completions`, {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`}, body: JSON.stringify({model, messages: conversation, stream: true})}),
+      reader = res.body.getReader(),
+      decoder = new TextDecoder()
+     let buf = ''
+     while (1) {
+      const {value, done} = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, {stream: true})
+      const lines = buf.split('\n')
+      buf = lines.pop()
+      for (const l of lines) {
+       if (!l.trim().startsWith('data:')) continue
+       const d = l.slice(5).trim()
+       if (d === '[DONE]') return onDone(text)
+       const delta = JSON.parse(d).choices[0]?.delta?.content
+       if (delta) {
+        text += delta
+        onChunk(text)
+       }
+      }
+     }
+    } catch {
+     onError?.()
+    }
+   }
+
+   const prepareConversation = async c => {
+    const s = c.systemPrompt?.trim(),
+     b = []
+    for (const m of conversation)
+     if (Array.isArray(m.content)) {
+      const e = []
+      for (const x of m.content)
+       if (x.type === 'image_url' && x.image_url?.url?.startsWith('imgref:')) {
+        const i = await loadImg(x.image_url.url.slice(7))
+        if (i) e.push({type: 'image_url', image_url: {url: i}})
+       } else e.push(x)
+      b.push({...m, content: e})
+     } else b.push({...m})
+    return s && b[0]?.role !== 'system' ? [{role: 'system', content: s}, ...b] : b
+   }
+
+   let msgCnt = 0,
+    curImgId = null
+   chatForm.onsubmit = async e => {
+    e.preventDefault()
+    const raw = userInput.value
+    const t = raw
+    if (raw.replace(/\s/g, '') === '' && !imageInput.files[0]) return
+    isSettingTitle = t.startsWith('--set-title')
+    let imgRef = null,
+     imgData = null
+    if (imageInput.files[0]) {
+     imgData = imgPreview.src
+     curImgId = 'img-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+     await saveImg(curImgId, imgData)
+     imgRef = 'imgref:' + curImgId
+    }
+    const userMsg = imgRef
+      ? {
+         role: 'user',
+         content: [
+          {type: 'text', text: t || 'Analyze this image'},
+          {type: 'image_url', image_url: {url: imgRef}}
+         ]
+        }
+      : {role: 'user', content: t},
+     displayContent = imgData
+      ? [
+         {type: 'text', text: t || 'Analyze this image'},
+         {type: 'image_url', image_url: {url: imgData}}
+        ]
+      : t
+    addMessage(displayContent, 'user')
+    userInput.value = ''
+    imageInput.value = ''
+    imagePreview.style.display = 'none'
+    const cfg = (await load(configKey)) ?? {}
+    conversation.push(userMsg)
+    await saveConversation()
+    const conv = await prepareConversation(cfg)
+    msgCnt++
+    const rid = `r${msgCnt}`
+    addMessage(`<span id="${rid}"></span>`, 'openai')
+    const rEl = $(rid),
+     mDiv = chatMessages.lastChild
+    await streamOpenAI({
+     urlBase: cfg.urlBase ?? 'https://api.openai.com/v1',
+     apiKey: cfg.apiKey ?? '',
+     model: cfg.model ?? 'gpt-4o-mini',
+     conversation: conv,
+     onChunk: c => {
+      rEl.innerHTML = renderMarkdown(c)
+      mDiv.scrollIntoView({block: 'end'})
+     },
+     onDone: async c => {
+      if (c) {
+       conversation.push({role: 'assistant', content: c})
+       await saveConversation()
+      }
+      rEl.innerHTML = renderMarkdown(c)
+      if (isSettingTitle) {
+       const ti =
+        (c || '')
+         .trim()
+         .replace(/\r?\n/g, ' ')
+         .replace(/[^\p{L}\p{N}\p{Extended_Pictographic} \-]/gu, '')
+         .trim()
+         .slice(0, 50) || 'New Chat'
+       document.title = ti
+       headerTitle.innerHTML = `${ti}<small class="text-secondary">Streaming Markdown</small><span class="chat-id-tag">${chatId}</span>`
+       save(`chatTitle-${chatId}`, ti)
+       isSettingTitle = false
+      }
+     },
+     onError: () => {
+      chatMessages.lastChild.remove()
+      addMessage('Connection error (streaming failed).', 'openai')
+     }
+    })
+   }
+
+   const savedTitle = await load(`chatTitle-${chatId}`)
+   if (savedTitle) {
+    document.title = savedTitle
+    headerTitle.innerHTML = `${savedTitle}<small class="text-secondary">Streaming Markdown</small><span class="chat-id-tag">${chatId}</span>`
+   }
+   newChatBtn.onclick = () => {
+    const nid = crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+    save(`chatConfig-${nid}`, {urlBase: urlBaseInput.value.trim(), apiKey: apiKeyInput.value.trim(), model: modelInput.value.trim(), systemPrompt: systemPromptInput.value.trim()})
+    window.open(`?chat=${nid}`, '_blank')
+   }
+   const listDataKeys = async () => { const d = await openDB(); const tx = d.transaction('data','readonly'); const o = tx.objectStore('data'); return new Promise((res, rej) => { const req = o.getAllKeys(); req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); }); }
+   const keys = await listDataKeys()
+   const chatIds = new Set()
+   keys.forEach(k => {
+    if (k.startsWith('chatHistory-')) chatIds.add(k.slice(12))
+    if (k.startsWith('chatTitle-')) chatIds.add(k.slice(10))
+    if (k.startsWith('chatConfig-')) chatIds.add(k.slice(11))
+   })
+   for (const id of Array.from(chatIds)) {
+    const t = (await load(`chatTitle-${id}`)) || 'Untitled'
+    const c = (await load(`chatConfig-${id}`)) ?? {}
+    const m = c?.model || ''
+    chatHistorySelect.insertAdjacentHTML('beforeend', `<option value="${id}">${t}(${m})</option>`)
+   }
+   chatHistorySelect.onchange = e => {
+    if (e.target.value) location.search = '?chat=' + e.target.value
+   }
+   userInput.onkeydown = e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+     e.preventDefault()
+     chatForm.requestSubmit()
+    }
+   }
+  </script>
+ </body>
 </html>
