@@ -190,6 +190,7 @@
     imagePreview = $('imagePreview'),
     imgPreview = $('imgPreview'),
     clearImg = $('clearImg')
+    let currentImageData = null;
 
    const handleImg = f => {
     const r = new FileReader()
@@ -201,22 +202,32 @@
       c.width = i.width * s
       c.height = i.height * s
       c.getContext('2d').drawImage(i, 0, 0, c.width, c.height)
-      imgPreview.src = c.toDataURL('image/jpeg', 0.5)
-      imagePreview.style.display = 'block'
+      currentImageData = c.toDataURL('image/jpeg', 0.5)
+      imgPreview.src = currentImageData
+      imagePreview.style.display = 'block';
      }
      i.src = e.target.result
     }
     r.readAsDataURL(f)
    }
    userInput.onpaste = e => {
-    const f = Array.from(e.clipboardData.items)
+    // Solo procesar imágenes si existen en el clipboard
+    const imageItem = Array.from(e.clipboardData.items)
      .find(x => x.type.startsWith('image'))
-     ?.getAsFile()
-    if (f) handleImg(f)
+
+    if (imageItem) {
+     const f = imageItem.getAsFile()
+     if (f) {
+      e.preventDefault() // Prevenir el pegado por defecto solo si hay imagen
+      handleImg(f)
+     }
+    }
+    // Si no hay imagen, permitir el pegado normal de texto
    }
    clearImg.onclick = () => {
-    imagePreview.style.display = 'none'
-    imgPreview.src = ''
+    imagePreview.style.display = 'none';
+    imgPreview.src = '';
+    currentImageData = null; // Limpiar la imagen actual
    }
 
    let isSettingTitle = false
@@ -308,36 +319,37 @@
    chatForm.onsubmit = async e => {
     e.preventDefault()
     const t = userInput.value
-    if (!t.trim() && !imgPreview.src) return
+
+    if (!t.trim() && !currentImageData) return
     isSettingTitle = t.startsWith('--set-title')
-    let imgRef = null,
-     imgData = null
-    if (imgPreview.src) {
-     imgData = imgPreview.src
-     const id = 'img-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
-     await saveImg(id, imgData)
-     imgRef = 'imgref:' + id
-    }
-    const userMsg = imgRef
-      ? {
+    let imgRef = null
+
+    const userMsg = currentImageData
+     ? (() => {
+        const id = 'img-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+        saveImg(id, currentImageData)
+        imgRef = 'imgref:' + id
+        return {
          role: 'user',
          content: [
           {type: 'text', text: t || 'Analyze image'},
           {type: 'image_url', image_url: {url: imgRef}}
          ]
         }
-      : {role: 'user', content: t},
-     displayContent = imgData
-      ? [
-         {type: 'text', text: t || 'Analyze image'},
-         {type: 'image_url', image_url: {url: imgData}}
-        ]
-      : t
+       })()
+     : {role: 'user', content: t}
+
+    const displayContent = currentImageData
+     ? [
+        {type: 'text', text: t || 'Analyze image'},
+        {type: 'image_url', image_url: {url: currentImageData}}
+       ]
+     : t
     addMessage(displayContent, 'user')
     userInput.value = ''
-    // BUGFIX: Resetear estado de imagen INMEDIATAMENTE después de enviar
-    imgPreview.src = '' // Limpiar src de la imagen
-    imagePreview.style.display = 'none' // Ocultar preview
+    imagePreview.style.display = 'none'
+    imgPreview.src = ''
+    currentImageData = null; // Limpiar la imagen actual
     conversation.push(userMsg)
     await saveConversation()
     const cfg = (await load(configKey)) || {},
