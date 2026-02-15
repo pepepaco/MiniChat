@@ -115,7 +115,6 @@
      <div class="mb-2">
       <label class="form-label">Model</label>
       <input type="text" class="form-control" id="model" required />
-
      </div>
      <div class="mb-2">
       <label class="form-label">System prompt</label>
@@ -138,180 +137,291 @@
    </form>
   </div>
   <script type="module">
-   const DB = 'm', V = 2, $ = id => document.getElementById(id);
-   const openDB = () => new Promise((y, n) => {
-    const r = indexedDB.open(DB, V);
-    r.onsuccess = () => y(r.result);
-    r.onupgradeneeded = () => ['data', 'imgs'].forEach(s => r.result.objectStoreNames.contains(s) || r.result.createObjectStore(s));
-    r.onerror = () => n(r.error);
-   });
+   const DB = 'm',
+    V = 2,
+    $ = id => document.getElementById(id)
+   const openDB = () =>
+    new Promise((y, n) => {
+     const r = indexedDB.open(DB, V)
+     r.onsuccess = () => y(r.result)
+     r.onupgradeneeded = () => ['data', 'imgs'].forEach(s => r.result.objectStoreNames.contains(s) || r.result.createObjectStore(s))
+     r.onerror = () => n(r.error)
+    })
    const db = async (s, mode, action, k, v) => {
-    const d = await openDB(), t = d.transaction(s, mode), o = t.objectStore(s);
+    const d = await openDB(),
+     t = d.transaction(s, mode),
+     o = t.objectStore(s)
     return new Promise((y, n) => {
-     const r = action === 'put' ? o.put(v, k) : o[action](k);
-     r.onsuccess = () => y(r.result);
-     r.onerror = () => n(r.error);
-    });
-   };
+     const r = action === 'put' ? o.put(v, k) : o[action](k)
+     r.onsuccess = () => y(r.result)
+     r.onerror = () => n(r.error)
+    })
+   }
    const save = (k, v) => db('data', 'readwrite', 'put', k, JSON.stringify(v)),
-    load = async k => JSON.parse(await db('data', 'readonly', 'get', k) || 'null'),
+    load = async k => JSON.parse((await db('data', 'readonly', 'get', k)) || 'null'),
     saveImg = (k, v) => db('imgs', 'readwrite', 'put', k, v),
-    loadImg = k => db('imgs', 'readonly', 'get', k);
+    loadImg = k => db('imgs', 'readonly', 'get', k)
 
    const chatId = (() => {
-    const p = new URLSearchParams(location.search);
-    let c = p.get('chat') || (crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2, 8));
-    if (!p.has('chat')) { p.set('chat', c); history.replaceState(null, '', '?' + p); }
-    return c;
-   })();
-   $('chatIdTag').textContent = chatId;
+    const p = new URLSearchParams(location.search)
+    let c = p.get('chat') || crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+    if (!p.has('chat')) {
+     p.set('chat', c)
+     history.replaceState(null, '', '?' + p)
+    }
+    return c
+   })()
+   $('chatIdTag').textContent = chatId
 
-   const settingsPanel = $('settingsPanel'), settingsToggle = $('settingsToggle'), settingsForm = $('settingsForm'),
-    urlBaseInput = $('urlBase'), apiKeyInput = $('apiKey'), modelInput = $('model'), systemPromptInput = $('systemPrompt'),
-    chatMessages = $('chatMessages'), chatForm = $('chatForm'), userInput = $('userInput'), newChatBtn = $('newChatBtn'),
-    generateTitleBtn = $('generateTitleBtn'), headerTitle = $('headerTitle'), chatHistorySelect = $('chatHistorySelect'),
-    imagePreview = $('imagePreview'), imgPreview = $('imgPreview'), clearImg = $('clearImg');
+   const settingsPanel = $('settingsPanel'),
+    settingsToggle = $('settingsToggle'),
+    settingsForm = $('settingsForm'),
+    urlBaseInput = $('urlBase'),
+    apiKeyInput = $('apiKey'),
+    modelInput = $('model'),
+    systemPromptInput = $('systemPrompt'),
+    chatMessages = $('chatMessages'),
+    chatForm = $('chatForm'),
+    userInput = $('userInput'),
+    newChatBtn = $('newChatBtn'),
+    generateTitleBtn = $('generateTitleBtn'),
+    headerTitle = $('headerTitle'),
+    chatHistorySelect = $('chatHistorySelect'),
+    imagePreview = $('imagePreview'),
+    imgPreview = $('imgPreview'),
+    clearImg = $('clearImg')
 
    const handleImg = f => {
-    const r = new FileReader();
+    const r = new FileReader()
     r.onload = e => {
-     const i = new Image();
+     const i = new Image()
      i.onload = () => {
-      const c = document.createElement('canvas'), s = Math.min(1, 1024 / Math.max(i.width, i.height));
-      c.width = i.width * s; c.height = i.height * s;
-      c.getContext('2d').drawImage(i, 0, 0, c.width, c.height);
-      imgPreview.src = c.toDataURL('image/jpeg', 0.5);
-      imagePreview.style.display = 'block';
-     };
-     i.src = e.target.result;
-    };
-    r.readAsDataURL(f);
-   };
-   userInput.onpaste = e => { const f = Array.from(e.clipboardData.items).find(x => x.type.startsWith('image'))?.getAsFile(); if (f) handleImg(f); };
-   clearImg.onclick = () => { imagePreview.style.display = 'none'; imgPreview.src = ''; };
+      const c = document.createElement('canvas'),
+       s = Math.min(1, 1024 / Math.max(i.width, i.height))
+      c.width = i.width * s
+      c.height = i.height * s
+      c.getContext('2d').drawImage(i, 0, 0, c.width, c.height)
+      imgPreview.src = c.toDataURL('image/jpeg', 0.5)
+      imagePreview.style.display = 'block'
+     }
+     i.src = e.target.result
+    }
+    r.readAsDataURL(f)
+   }
+   userInput.onpaste = e => {
+    const f = Array.from(e.clipboardData.items)
+     .find(x => x.type.startsWith('image'))
+     ?.getAsFile()
+    if (f) handleImg(f)
+   }
+   clearImg.onclick = () => {
+    imagePreview.style.display = 'none'
+    imgPreview.src = ''
+   }
 
-   let isSettingTitle = false;
-   generateTitleBtn.onclick = () => { userInput.value = '--set-title: Generate a short title (max 5 words). Respond only with the title.'; userInput.focus(); };
+   let isSettingTitle = false
+   generateTitleBtn.onclick = () => {
+    userInput.value = '--set-title: Generate a short title (max 5 words). Respond only with the title.'
+    userInput.focus()
+   }
 
-   const configKey = `chatConfig-${chatId}`, loadConfig = async () => {
-    const c = await load(configKey) || {};
-    urlBaseInput.value = c.urlBase || 'https://api.openai.com/v1';
-    apiKeyInput.value = c.apiKey || '';
-    modelInput.value = c.model || 'gpt-4o-mini';
-    systemPromptInput.value = c.systemPrompt || '';
-   };
-   loadConfig();
-   settingsToggle.onclick = () => settingsPanel.classList.toggle('show');
+   const configKey = `chatConfig-${chatId}`,
+    loadConfig = async () => {
+     const c = (await load(configKey)) || {}
+     urlBaseInput.value = c.urlBase || 'https://api.openai.com/v1'
+     apiKeyInput.value = c.apiKey || ''
+     modelInput.value = c.model || 'gpt-4o-mini'
+     systemPromptInput.value = c.systemPrompt || ''
+    }
+   loadConfig()
+   settingsToggle.onclick = () => settingsPanel.classList.toggle('show')
    settingsForm.onsubmit = e => {
-    e.preventDefault();
-    save(configKey, {urlBase: urlBaseInput.value.trim(), apiKey: apiKeyInput.value.trim(), model: modelInput.value.trim(), systemPrompt: systemPromptInput.value.trim()});
-    settingsPanel.classList.remove('show');
-   };
+    e.preventDefault()
+    save(configKey, {urlBase: urlBaseInput.value.trim(), apiKey: apiKeyInput.value.trim(), model: modelInput.value.trim(), systemPrompt: systemPromptInput.value.trim()})
+    settingsPanel.classList.remove('show')
+   }
 
-   let conversation = [];
+   let conversation = []
    const saveConversation = () => save(`chatHistory-${chatId}`, conversation),
     renderMarkdown = t => marked.parse(t),
     addMessage = (c, s) => {
-     const h = Array.isArray(c) ? c.reduce((a, x) => a + (x.type === 'text' ? (s === 'openai' ? renderMarkdown(x.text) : x.text) : `<img src="${x.image_url.url}" style="max-width:100%;max-height:300px;display:block;margin-top:5px;border-radius:8px">`), '') : s === 'openai' ? renderMarkdown(c) : c;
-     chatMessages.insertAdjacentHTML('beforeend', `<div class="message ${s}"><span>${h}</span></div>`);
-     chatMessages.lastChild.scrollIntoView({block: 'end'});
+     const h = Array.isArray(c) ? c.reduce((a, x) => a + (x.type === 'text' ? (s === 'openai' ? renderMarkdown(x.text) : x.text) : `<img src="${x.image_url.url}" style="max-width:100%;max-height:300px;display:block;margin-top:5px;border-radius:8px">`), '') : s === 'openai' ? renderMarkdown(c) : c
+     chatMessages.insertAdjacentHTML('beforeend', `<div class="message ${s}"><span>${h}</span></div>`)
+     chatMessages.lastChild.scrollIntoView({block: 'end'})
     },
-    resolveImgs = async (content) => {
-     if (!Array.isArray(content)) return content;
-     return Promise.all(content.map(async x => {
-      if (x.type === 'image_url' && x.image_url?.url?.startsWith('imgref:')) {
-       const i = await loadImg(x.image_url.url.slice(7));
-       return i ? {type: 'image_url', image_url: {url: i}} : x;
-      }
-      return x;
-     }));
+    resolveImgs = async content => {
+     if (!Array.isArray(content)) return content
+     return Promise.all(
+      content.map(async x => {
+       if (x.type === 'image_url' && x.image_url?.url?.startsWith('imgref:')) {
+        const i = await loadImg(x.image_url.url.slice(7))
+        return i ? {type: 'image_url', image_url: {url: i}} : x
+       }
+       return x
+      })
+     )
     },
     restoreHistory = async () => {
-     conversation = await load(`chatHistory-${chatId}`) || [];
-     chatMessages.innerHTML = '';
-     for (const m of conversation) addMessage(await resolveImgs(m.content), m.role === 'user' ? 'user' : 'openai');
-    };
-   await restoreHistory();
+     conversation = (await load(`chatHistory-${chatId}`)) || []
+     chatMessages.innerHTML = ''
+     for (const m of conversation) addMessage(await resolveImgs(m.content), m.role === 'user' ? 'user' : 'openai')
+    }
+   await restoreHistory()
 
    const streamOpenAI = async ({urlBase, apiKey, model, conversation, onChunk, onDone, onError}) => {
     try {
-     const res = await fetch(`${urlBase}/chat/completions`, {method: 'POST', headers: {'Content-Type': 'application/json',mode: 'cors', Authorization: `Bearer ${apiKey}`}, body: JSON.stringify({model, messages: conversation, stream: true})}),
-      reader = res.body.getReader(), decoder = new TextDecoder();
-     let buf = '', text = '';
+     const res = await fetch(`${urlBase}/chat/completions`, {method: 'POST', headers: {'Content-Type': 'application/json', mode: 'cors', Authorization: `Bearer ${apiKey}`}, body: JSON.stringify({model, messages: conversation, stream: true})}),
+      reader = res.body.getReader(),
+      decoder = new TextDecoder()
+     let buf = '',
+      text = ''
      while (1) {
-      const {value, done} = await reader.read(); if (done) break;
-      buf += decoder.decode(value, {stream: true});
-      const lines = buf.split('\n'); buf = lines.pop();
+      const {value, done} = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, {stream: true})
+      const lines = buf.split('\n')
+      buf = lines.pop()
       for (const l of lines) {
-       if (!l.trim().startsWith('data:')) continue;
-       const d = l.slice(5).trim(); if (d === '[DONE]') return onDone(text);
-       const delta = JSON.parse(d).choices[0]?.delta?.content;
-       if (delta) { text += delta; onChunk(text); }
+       if (!l.trim().startsWith('data:')) continue
+       const d = l.slice(5).trim()
+       if (d === '[DONE]') return onDone(text)
+       const delta = JSON.parse(d).choices[0]?.delta?.content
+       if (delta) {
+        text += delta
+        onChunk(text)
+       }
       }
      }
-    } catch { onError?.(); }
-   };
+    } catch {
+     onError?.()
+    }
+   }
 
    const prepareConversation = async () => {
-    const s = systemPromptInput.value.trim(), b = [];
-    for (const m of conversation) b.push({...m, content: await resolveImgs(m.content)});
-    return s && b[0]?.role !== 'system' ? [{role: 'system', content: s}, ...b] : b;
-   };
+    const s = systemPromptInput.value.trim(),
+     b = []
+    for (const m of conversation) b.push({...m, content: await resolveImgs(m.content)})
+    return s && b[0]?.role !== 'system' ? [{role: 'system', content: s}, ...b] : b
+   }
 
-   let msgCnt = 0;
+   let msgCnt = 0
    chatForm.onsubmit = async e => {
-    e.preventDefault();
-    const t = userInput.value; if (!t.trim() && !imgPreview.src) return;
-    isSettingTitle = t.startsWith('--set-title');
-    let imgRef = null, imgData = null;
+    e.preventDefault()
+    const t = userInput.value
+    if (!t.trim() && !imgPreview.src) return
+    isSettingTitle = t.startsWith('--set-title')
+    let imgRef = null,
+     imgData = null
     if (imgPreview.src) {
-     imgData = imgPreview.src;
-     const id = 'img-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-     await saveImg(id, imgData); imgRef = 'imgref:' + id;
+     imgData = imgPreview.src
+     const id = 'img-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+     await saveImg(id, imgData)
+     imgRef = 'imgref:' + id
     }
-    const userMsg = imgRef ? {role: 'user', content: [{type: 'text', text: t || 'Analyze image'}, {type: 'image_url', image_url: {url: imgRef}}]} : {role: 'user', content: t},
-     displayContent = imgData ? [{type: 'text', text: t || 'Analyze image'}, {type: 'image_url', image_url: {url: imgData}}] : t;
-    addMessage(displayContent, 'user');
-    userInput.value = '';
+    const userMsg = imgRef
+      ? {
+         role: 'user',
+         content: [
+          {type: 'text', text: t || 'Analyze image'},
+          {type: 'image_url', image_url: {url: imgRef}}
+         ]
+        }
+      : {role: 'user', content: t},
+     displayContent = imgData
+      ? [
+         {type: 'text', text: t || 'Analyze image'},
+         {type: 'image_url', image_url: {url: imgData}}
+        ]
+      : t
+    addMessage(displayContent, 'user')
+    userInput.value = ''
     // BUGFIX: Resetear estado de imagen INMEDIATAMENTE después de enviar
-    imgPreview.src = ''; // Limpiar src de la imagen
-    imagePreview.style.display = 'none'; // Ocultar preview
-    conversation.push(userMsg); await saveConversation();
-    const cfg = await load(configKey) || {}, conv = await prepareConversation();
-    const rid = `r${++msgCnt}`; addMessage(`<span id="${rid}"></span>`, 'openai');
-    const rEl = $(rid), mDiv = chatMessages.lastChild;
+    imgPreview.src = '' // Limpiar src de la imagen
+    imagePreview.style.display = 'none' // Ocultar preview
+    conversation.push(userMsg)
+    await saveConversation()
+    const cfg = (await load(configKey)) || {},
+     conv = await prepareConversation()
+    const rid = `r${++msgCnt}`
+    addMessage(`<span id="${rid}"></span>`, 'openai')
+    const rEl = $(rid),
+     mDiv = chatMessages.lastChild
     await streamOpenAI({
-     urlBase: cfg.urlBase || 'https://api.openai.com/v1', apiKey: cfg.apiKey || '', model: cfg.model || 'gpt-4o-mini', conversation: conv,
-     onChunk: c => { rEl.innerHTML = renderMarkdown(c); mDiv.scrollIntoView({block: 'end'}); },
+     urlBase: cfg.urlBase || 'https://api.openai.com/v1',
+     apiKey: cfg.apiKey || '',
+     model: cfg.model || 'gpt-4o-mini',
+     conversation: conv,
+     onChunk: c => {
+      rEl.innerHTML = renderMarkdown(c)
+      mDiv.scrollIntoView({block: 'end'})
+     },
      onDone: async c => {
-      if (c) { conversation.push({role: 'assistant', content: c}); await saveConversation(); }
-      rEl.innerHTML = renderMarkdown(c);
+      if (c) {
+       conversation.push({role: 'assistant', content: c})
+       await saveConversation()
+      }
+      rEl.innerHTML = renderMarkdown(c)
       if (isSettingTitle) {
-       const ti = (c || '').trim().replace(/\r?\n/g, ' ').replace(/[^\p{L}\p{N}\p{Extended_Pictographic} \-]/gu, '').trim().slice(0, 50) || 'New Chat';
-       document.title = ti; headerTitle.innerHTML = `${ti}<small class="text-secondary">Streaming Markdown</small><span class="chat-id-tag">${chatId}</span>`;
-       save(`chatTitle-${chatId}`, ti); isSettingTitle = false;
+       const ti =
+        (c || '')
+         .trim()
+         .replace(/\r?\n/g, ' ')
+         .replace(/[^\p{L}\p{N}\p{Extended_Pictographic} \-]/gu, '')
+         .trim()
+         .slice(0, 50) || 'New Chat'
+       document.title = ti
+       headerTitle.innerHTML = `${ti}<small class="text-secondary">Streaming Markdown</small><span class="chat-id-tag">${chatId}</span>`
+       save(`chatTitle-${chatId}`, ti)
+       isSettingTitle = false
       }
      },
-     onError: () => { chatMessages.lastChild.remove(); addMessage('Error.', 'openai'); }
-    });
-   };
+     onError: () => {
+      chatMessages.lastChild.remove()
+      addMessage('Error.', 'openai')
+     }
+    })
+   }
 
-   (async () => {
-    const ti = await load(`chatTitle-${chatId}`); if (ti) { document.title = ti; headerTitle.innerHTML = `${ti}<small class="text-secondary">Streaming Markdown</small><span class="chat-id-tag">${chatId}</span>`; }
-    newChatBtn.onclick = () => {
-     const nid = crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-     save(`chatConfig-${nid}`, {urlBase: urlBaseInput.value, apiKey: apiKeyInput.value, model: modelInput.value, systemPrompt: systemPromptInput.value});
-     window.open(`?chat=${nid}`, '_blank');
-    };
-    const d = await openDB(), tx = d.transaction('data', 'readonly'), o = tx.objectStore('data'), keys = await new Promise(r => { const req = o.getAllKeys(); req.onsuccess = () => r(req.result); });
-    const chatIds = new Set(); keys.forEach(k => { if (k.startsWith('chatHistory-')) chatIds.add(k.slice(12)); else if (k.startsWith('chatTitle-')) chatIds.add(k.slice(10)); else if (k.startsWith('chatConfig-')) chatIds.add(k.slice(11)); });
-    for (const id of chatIds) {
-     const t = await load(`chatTitle-${id}`) || 'Untitled', c = await load(`chatConfig-${id}`) || {}, m = c.model || '';
-     chatHistorySelect.insertAdjacentHTML('beforeend', `<option value="${id}">${t}(${m})</option>`);
+   ;(async () => {
+    const ti = await load(`chatTitle-${chatId}`)
+    if (ti) {
+     document.title = ti
+     headerTitle.innerHTML = `${ti}<small class="text-secondary">Streaming Markdown</small><span class="chat-id-tag">${chatId}</span>`
     }
-   })();
-   chatHistorySelect.onchange = e => { if (e.target.value) location.search = '?chat=' + e.target.value; };
-   userInput.onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatForm.requestSubmit(); } };
+    newChatBtn.onclick = () => {
+     const nid = crypto.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+     save(`chatConfig-${nid}`, {urlBase: urlBaseInput.value, apiKey: apiKeyInput.value, model: modelInput.value, systemPrompt: systemPromptInput.value})
+     window.open(`?chat=${nid}`, '_blank')
+    }
+    const d = await openDB(),
+     tx = d.transaction('data', 'readonly'),
+     o = tx.objectStore('data'),
+     keys = await new Promise(r => {
+      const req = o.getAllKeys()
+      req.onsuccess = () => r(req.result)
+     })
+    const chatIds = new Set()
+    keys.forEach(k => {
+     if (k.startsWith('chatHistory-')) chatIds.add(k.slice(12))
+     else if (k.startsWith('chatTitle-')) chatIds.add(k.slice(10))
+     else if (k.startsWith('chatConfig-')) chatIds.add(k.slice(11))
+    })
+    for (const id of chatIds) {
+     const t = (await load(`chatTitle-${id}`)) || 'Untitled',
+      c = (await load(`chatConfig-${id}`)) || {},
+      m = c.model || ''
+     chatHistorySelect.insertAdjacentHTML('beforeend', `<option value="${id}">${t}(${m})</option>`)
+    }
+   })()
+   chatHistorySelect.onchange = e => {
+    if (e.target.value) location.search = '?chat=' + e.target.value
+   }
+   userInput.onkeydown = e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+     e.preventDefault()
+     chatForm.requestSubmit()
+    }
+   }
   </script>
  </body>
 </html>
