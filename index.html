@@ -235,7 +235,7 @@
 
    const streamOpenAI = async ({urlBase, apiKey, model, conversation, onChunk, onDone, onError}) => {
     try {
-     const res = await fetch(`${urlBase}/chat/completions`, {method: 'POST', headers: {'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`}, body: JSON.stringify({model, messages: conversation, stream: true})}),
+     const res = await fetch(`${urlBase}/chat/completions`, {method: 'POST', headers: {'Content-Type': 'application/json',mode: 'cors', Authorization: `Bearer ${apiKey}`}, body: JSON.stringify({model, messages: conversation, stream: true})}),
       reader = res.body.getReader(), decoder = new TextDecoder();
      let buf = '', text = '';
      while (1) {
