@@ -25,13 +25,14 @@ app.use(express.static(path.join(__dirname, 'public')))
 app.use(
  '/v1',
  createProxyMiddleware({
-  target: 'https://api.openai.com',
+  target: req.query.target ? decodeURIComponent(req.query.target) : 'https://api.openai.com',
   changeOrigin: true,
   pathRewrite: {'^/v1': '/v1'},
   onProxyReq: (proxyReq, req, res) => {
    // ✅ NO añadimos API key del servidor
    // ✅ Reenviamos el Authorization header que viene del cliente
-   console.log(`🔄 Proxy: ${req.method} ${req.url} → api.openai.com${req.url}`)
+   const target = req.query.target ? decodeURIComponent(req.query.target) : 'https://api.openai.com';
+   console.log(`🔄 Proxy: ${req.method} ${req.url} → ${target}${req.url.replace('/v1?target=.*', '/v1')}`);
    console.log(`   Token: ${req.headers.authorization ? '✅ Presente' : '❌ Ausente'}`)
   },
   onError: (err, req, res) => {
