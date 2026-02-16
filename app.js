@@ -1,128 +1,20 @@
-const express = require('express')
-const crypto = require('crypto')
-const cookieParser = require('cookie-parser')
-const path = require('path')
-const cors = require('cors')
-const {createProxyMiddleware} = require('http-proxy-middleware')
+const express = require('express');
+const crypto = require('crypto');
+const cookieParser = require('cookie-parser');
 
-const app = express()
-const CONFIG_COOKIE = 'chat_config_v1'
+const app = express();
+const CONFIG_COOKIE = 'chat_config_v1';
 
-// ===========================
-// MIDDLEWARES
-// ===========================
-
-app.use(cors({origin: true, credentials: true}))
-app.use(express.urlencoded({extended: true, limit: '5mb'}))
-app.use(express.json({limit: '5mb'}))
-app.use(cookieParser())
-app.use(express.static(path.join(__dirname, 'public')))
-
-// ===========================
-// 🔥 **PROXY TRANSPARENTE - REENVÍA TOKEN DEL CLIENTE**
-// ===========================
-
-app.use(
- '/v1',
- createProxyMiddleware({
-  target: req.query.target ? decodeURIComponent(req.query.target) : 'https://api.openai.com',
-  changeOrigin: true,
-  pathRewrite: {'^/v1': '/v1'},
-  onProxyReq: (proxyReq, req, res) => {
-   // ✅ NO añadimos API key del servidor
-   // ✅ Reenviamos el Authorization header que viene del cliente
-   const target = req.query.target ? decodeURIComponent(req.query.target) : 'https://api.openai.com';
-   console.log(`🔄 Proxy: ${req.method} ${req.url} → ${target}${req.url.replace('/v1?target=.*', '/v1')}`);
-   console.log(`   Token: ${req.headers.authorization ? '✅ Presente' : '❌ Ausente'}`)
-  },
-  onError: (err, req, res) => {
-   console.error('❌ Proxy error:', err)
-   res.status(500).json({error: 'Proxy error', details: err.message})
-  }
- })
-)
-
-// ===========================
-// CONFIGURACIÓN
-// ===========================
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+app.use(express.json({ limit: '5mb' }));
+app.use(cookieParser());
 
 const DEFAULT_CONFIG = {
- urlBase: 'https://api.openai.com/v1',
- apiKey: process.env.OPENAI_API_KEY || '',
- model: 'gpt-4.1',
- systemPrompt: 'helpful human assistant'
-}
-
-// ===========================
-// CRYPTO
-// ===========================
-
-const ENCRYPTION_KEY = crypto.scryptSync('your-secret-password-that-is-long-enough-for-security', 'salt-for-encryption-key', 32)
-
-const encrypt = text => {
- const iv = crypto.randomBytes(16)
- const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv)
- return iv.toString('hex') + ':' + Buffer.concat([cipher.update(text), cipher.final()]).toString('hex')
-}
-
-const decrypt = text => {
- try {
-  const [ivHex, encHex] = text.split(':')
-  const decipher = crypto.createDecipheriv('aes-256-cbc', ENCRYPTION_KEY, Buffer.from(ivHex, 'hex'))
-  return Buffer.concat([decipher.update(Buffer.from(encHex, 'hex')), decipher.final()]).toString()
- } catch {
-  return null
- }
-}
-
-// ===========================
-// STATE MANAGEMENT
-// ===========================
-
-const loadConfig = req => {
- const cookie = req.cookies?.[CONFIG_COOKIE]
- if (cookie) {
-  const decrypted = decrypt(cookie)
-  if (decrypted) {
-   try {
-    return JSON.parse(decrypted)
-   } catch {}
-  }
- }
- return {}
-}
-
-const getState = req => {
- let state = {}
- const viewstate = req.body?.__VIEWSTATE || req.query?.__VIEWSTATE
- if (viewstate) {
-  const decrypted = decrypt(viewstate)
-  if (decrypted) {
-   try {
-    state = JSON.parse(decrypted)
-   } catch {}
-  }
- }
- state.config = {...DEFAULT_CONFIG, ...state.config, ...loadConfig(req)}
- state.messages = state.messages || []
- state.chatId = state.chatId || Date.now().toString(36)
- state.title = state.title || 'New Chat 💬'
- return state
-}
-
-// ===========================
-// MARKED Y RENDER HTML
-// ===========================
-
-marked = null
-
-const getMarked = async () => {
- if (!marked) {
-  const mod = await import('marked')
-  marked = mod.marked || mod.default?.marked || mod.default || mod
- }
- return marked
-}
+	urlBase: 'https://api.openai.com/v1',
+	apiKey: '',
+	model: 'gpt-4.1',
+	systemPrompt: 'helpful human assistant',
+};
 
 const CSS = `
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
@@ -134,19 +26,177 @@ html,body{height:100%;width:100%;margin:0;padding:0;background:#f8f9fa;animation
 .speed-indicator{font-size:.85em;color:#888;padding-left:1em}
 code,pre{font-family:'Fira Mono','Consolas',monospace;background:#f1f3f5;border-radius:4px;padding:2px 6px}
 @media(max-width:600px){.message span{max-width:100%;font-size:1em}}
-`
+`;
 
+// Crypto simplificado
+const ENCRYPTION_KEY = crypto.scryptSync(
+	'your-secret-password-that-is-long-enough',
+	'salt-for-the-key',
+	32,
+);
+const encrypt = text => {
+	const iv = crypto.randomBytes(16);
+	const cipher = crypto.createCipheriv('aes-256-cbc', ENCRYPTION_KEY, iv);
+	return (
+		iv.toString('hex') +
+		':' +
+		Buffer.concat([cipher.update(text), cipher.final()]).toString('hex')
+	);
+};
+
+const decrypt = text => {
+	try {
+		const [ivHex, encHex] = text.split(':');
+		const decipher = crypto.createDecipheriv(
+			'aes-256-cbc',
+			ENCRYPTION_KEY,
+			Buffer.from(ivHex, 'hex'),
+		);
+		return Buffer.concat([
+			decipher.update(Buffer.from(encHex, 'hex')),
+			decipher.final(),
+		]).toString();
+	} catch {
+		return null;
+	}
+};
+
+// State management
+const loadConfig = req => {
+	const cookie = req.cookies?.[CONFIG_COOKIE];
+	if (cookie) {
+		const decrypted = decrypt(cookie);
+		if (decrypted)
+			try {
+				return JSON.parse(decrypted);
+			} catch {}
+	}
+	return {};
+};
+
+const getState = req => {
+	let state = {};
+	const viewstate = req.body?.__VIEWSTATE || req.query?.__VIEWSTATE;
+	if (viewstate) {
+		const decrypted = decrypt(viewstate);
+		if (decrypted)
+			try {
+				state = JSON.parse(decrypted);
+			} catch {}
+	}
+	state.config = { ...DEFAULT_CONFIG, ...state.config, ...loadConfig(req) };
+	state.messages = state.messages || [];
+	state.chatId = state.chatId || Date.now().toString(36);
+	state.title = state.title || 'New Chat 💬';
+	state.showConfig = state.showConfig || false;
+	state.chatHistory = state.chatHistory || {};
+	return state;
+};
+
+// Chat history management
+const saveChatHistory = (req, res, state) => {
+	const historyKey = `chatHistory-${state.chatId}`;
+	const historyEntry = {
+		chatId: state.chatId,
+		messages: state.messages,
+		title: state.title,
+		config: state.config,
+		timestamp: Date.now()
+	};
+	
+	// Save to VIEWSTATE
+	state.chatHistory = state.chatHistory || {};
+	state.chatHistory[historyKey] = historyEntry;
+	
+	// Save to cookie for persistence
+	res.cookie(`chatHistory-${state.chatId}`, encrypt(JSON.stringify(historyEntry)), {
+		httpOnly: true,
+		secure: app.get('env') === 'production',
+		maxAge: 365 * 24 * 60 * 60 * 1000,
+		sameSite: 'Strict',
+	});
+};
+
+const loadChatHistory = req => {
+	const state = getState(req);
+	const history = {};
+	
+	// Load from cookies
+	const cookies = req.cookies || {};
+	for (const key in cookies) {
+		if (key.startsWith('chatHistory-')) {
+			const decrypted = decrypt(cookies[key]);
+			if (decrypted) {
+				try {
+					const entry = JSON.parse(decrypted);
+					history[key] = entry;
+				} catch {}
+			}
+		}
+	}
+	
+	state.chatHistory = history;
+	return state;
+};
+
+const getChatHistoryOptions = state => {
+	const history = state.chatHistory || {};
+	const options = [];
+	
+	for (const key in history) {
+		const entry = history[key];
+		const model = entry.config?.model || 'unknown';
+		const title = entry.title || 'Untitled Chat';
+		options.push(`<option value="${entry.chatId}">${title} (${model})</option>`);
+	}
+	
+	return options.length > 0 ? options.join('\n') : '';
+};
+
+const switchToChat = (state, chatId) => {
+	const history = state.chatHistory || {};
+	const historyKey = `chatHistory-${chatId}`;
+	
+	if (history[historyKey]) {
+		const entry = history[historyKey];
+		state.messages = entry.messages || [];
+		state.title = entry.title || 'New Chat 💬';
+		state.chatId = chatId;
+		state.config = entry.config || state.config;
+	}
+	
+	return state;
+};
+
+// marked cargado dinámicamente para evitar ERR_REQUIRE_ESM
+const getMarked = async () => {
+	if (!getMarked._marked) {
+		const mod = await import('marked');
+		// soportar varias formas de export (default, named)
+		getMarked._marked =
+			(mod && (mod.marked || mod.default?.marked || mod.default)) || mod;
+	}
+	return getMarked._marked;
+};
+
+// Render HTML
 const renderPage = async (state, req = null, isDownload = false) => {
- const marked = await getMarked()
- const {config, messages, chatId, showConfig} = state
- const encryptedState = encrypt(JSON.stringify(state))
- const lastUserIdx = messages.map(m => m.role).lastIndexOf('user')
- const speedInfo = state.speedInfo ? `<br><small class="speed-indicator">${state.speedInfo}</small>` : ''
- state.speedInfo = null
+	// asegurar marked disponible
+	const marked = await getMarked();
+	const { config, messages, chatId, showConfig } = state;
+	const encryptedState = encrypt(JSON.stringify(state));
+	const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
+	const speedInfo = state.speedInfo
+		? `<br><small class="speed-indicator">${state.speedInfo}</small>`
+		: '';
+	state.speedInfo = null;
 
- const baseUrl = isDownload && req ? `<base href="${req.protocol}://${req.get('host')}">` : ''
+	const baseUrl =
+		isDownload && req
+			? `<base href="${req.protocol}://${req.get('host')}">`
+			: '';
 
- return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -165,7 +215,9 @@ ${baseUrl}
 <button type="submit" name="action" value="sendMessage" style="display:none" aria-hidden="true"></button>
 <div class="d-flex flex-column" style="height:100vh">
 <header class="p-3 border-bottom d-flex align-items-center justify-content-between">
-  <span class="fw-bold">${state.title} <small class="text-secondary">VIEWSTATE</small>
+  <span class="fw-bold">${
+		state.title
+	} <small class="text-secondary">VIEWSTATE</small>
   <span class="chat-id-tag">${chatId}</span></span>
   <div class="d-flex align-items-center gap-2">
   <button class="btn btn-outline-secondary btn-sm" type="submit" name="action" value="downloadChat">Save</button>
@@ -175,32 +227,50 @@ ${baseUrl}
   </div>
 </header>
 ${
- showConfig
-  ? `
+	showConfig
+		? `
 <section class="bg-light border-bottom" style="padding:16px">
 <div class="mb-2">
 <label class="form-label">Base URL</label>
-<input type="text" class="form-control" name="urlBase" value="${config.urlBase}" autocomplete="on"/>
+<input type="text" class="form-control" name="urlBase" value="${
+				config.urlBase
+			}" autocomplete="on"/>
 </div>
 <div class="mb-2">
 <label class="form-label">API Key</label>
-<input type="password" class="form-control" name="apiKey" value="${config.apiKey}" autocomplete="on"/>
+<input type="text" class="form-control" name="apiKey" value="${
+				config.apiKey
+			}" autocomplete="on"/>
 </div>
 <div class="mb-2">
 <label class="form-label">Model</label>
-<input type="text" class="form-control" name="model" value="${config.model}" autocomplete="on"/>
+<input type="text" class="form-control" name="model" value="${
+				config.model
+			}" autocomplete="on"/>
 </div>
 <div class="mb-2">
 <label class="form-label">System prompt</label>
-<textarea class="form-control" name="systemPrompt" rows="2" autocomplete="on">${config.systemPrompt || ''}</textarea>
+<textarea class="form-control" name="systemPrompt" rows="2" autocomplete="on">${
+				config.systemPrompt || ''
+			}</textarea>
 </div>
 <button type="submit" class="btn btn-primary btn-sm w-100" name="action" value="saveSettings">Guardar</button>
 </section>`
-  : ''
+		: ''
 }
 <div class="d-flex flex-column" style="flex:1;overflow-y:auto">
   <main class="p-3 bg-white">
-  ${messages.map((msg, i) => (msg.role === 'user' ? `<div class="message user text-end"${i === lastUserIdx ? ' id="last-user-msg"' : ''}><span>${msg.content}</span></div>` : `<div class="message openai text-start"><span>${marked.parse(msg.content)}${i === messages.length - 1 ? speedInfo : ''}</span></div>`)).join('\n')}
+  ${messages
+		.map((msg, i) =>
+			msg.role === 'user'
+				? `<div class="message user text-end"${
+						i === lastUserIdx ? ' id="last-user-msg"' : ''
+					}><span>${msg.content}</span></div>`
+				: `<div class="message openai text-start"><span>${marked.parse(
+						msg.content,
+					)}${i === messages.length - 1 ? speedInfo : ''}</span></div>`,
+		)
+		.join('\n')}
   </main>
   <div class="d-flex p-3 gap-2 bg-white border-top">
   <input type="text" class="form-control flex-grow-1" name="userInput" placeholder="Type your message..." autofocus autocomplete="off"/>
@@ -210,128 +280,147 @@ ${
 </div>
 </form>
 </body>
-</html>`
-}
+</html>`;
+};
 
-// ===========================
-// API HELPERS (para VIEWSTATE)
-// ===========================
-
+// API helpers
 const getAuthHeaders = cfg => {
- if (!cfg?.apiKey) return {'Content-Type': 'application/json'}
- const isAzure = cfg.urlBase?.includes('openai.azure.com')
- return {
-  'Content-Type': 'application/json',
-  ...(isAzure ? {'api-key': cfg.apiKey} : {Authorization: `Bearer ${cfg.apiKey}`})
- }
-}
+	if (!cfg?.apiKey) return { 'Content-Type': 'application/json' };
+	const isAzure = cfg.urlBase?.includes('openai.azure.com');
+	return {
+		'Content-Type': 'application/json',
+		...(isAzure
+			? { 'api-key': cfg.apiKey }
+			: { Authorization: `Bearer ${cfg.apiKey}` }),
+	};
+};
 
 const callOpenAI = async (state, messages) => {
- const url = `${state.config.urlBase.replace(/\/+$/, '')}/chat/completions`
- try {
-  const res = await fetch(url, {
-   method: 'POST',
-   headers: getAuthHeaders(state.config),
-   body: JSON.stringify({model: state.config.model, messages})
-  })
+	const url = `${state.config.urlBase.replace(/\/+$/, '')}/chat/completions`;
+	try {
+		const res = await fetch(url, {
+			method: 'POST',
+			headers: getAuthHeaders(state.config),
+			body: JSON.stringify({ model: state.config.model, messages }),
+		});
 
-  if (!res.ok) {
-   const text = await res.text().catch(() => '')
-   return {ok: false, status: res.status, text}
-  }
+		if (!res.ok) {
+			const text = await res.text().catch(() => '');
+			return { ok: false, status: res.status, text };
+		}
 
-  const data = await res.json()
-  return {ok: true, data}
- } catch (err) {
-  return {ok: false, status: 0, text: String(err)}
- }
-}
+		const data = await res.json();
+		return { ok: true, data };
+	} catch (err) {
+		return { ok: false, status: 0, text: String(err) };
+	}
+};
 
-// ===========================
-// RUTAS VIEWSTATE (dinámica SIN JavaScript)
-// ===========================
-
-app.get('/', async (req, res) => {
- res.send(await renderPage(getState(req)))
-})
-
-app.get('/client', (req, res) => {
- res.sendFile(path.join(__dirname, 'public', 'index.html'))
-})
+// Routes
+app.get('/', async (req, res) => res.send(await renderPage(getState(req))));
 
 app.post('/', async (req, res) => {
- const state = getState(req)
- const {userInput, action, urlBase, apiKey, model, systemPrompt} = req.body
+	const state = getState(req);
+	const { userInput, action, urlBase, apiKey, model, systemPrompt } = req.body;
 
- switch (action) {
-  case 'sendMessage':
-   if (userInput) {
-    state.messages.push({role: 'user', content: userInput})
-    let conv = [...state.messages]
-    if (state.config.systemPrompt && conv[0]?.role !== 'system') {
-     conv = [{role: 'system', content: state.config.systemPrompt}, ...conv]
-    }
+	switch (action) {
+		case 'sendMessage':
+			if (userInput) {
+				state.messages.push({ role: 'user', content: userInput });
+				let conv = [...state.messages];
+				if (state.config.systemPrompt && conv[0]?.role !== 'system') {
+					conv = [
+						{ role: 'system', content: state.config.systemPrompt },
+						...conv,
+					];
+				}
 
-    const result = await callOpenAI(state, conv)
-    if (result.ok) {
-     const reply = result.data.choices?.[0]?.message?.content ?? 'No response'
-     state.messages.push({role: 'assistant', content: reply})
-     state.speedInfo = `Tokens: ${reply.length}`
-    } else {
-     state.messages.push({role: 'assistant', content: `Error ${result.status}: ${result.text}`})
-    }
-   }
-   break
+				const result = await callOpenAI(state, conv);
+				if (result.ok) {
+					const reply =
+						result.data.choices?.[0]?.message?.content ?? 'No response';
+					state.messages.push({ role: 'assistant', content: reply });
+					state.speedInfo = `Tokens: ${reply.length}`;
+				} else {
+					state.messages.push({
+						role: 'assistant',
+						content: `Error ${result.status}: ${result.text}`,
+					});
+				}
+			}
+			break;
 
-  case 'toggleConfig':
-   state.showConfig = !state.showConfig
-   break
+		case 'toggleConfig':
+			state.showConfig = !state.showConfig;
+			break;
 
-  case 'saveSettings':
-   Object.assign(state.config, {urlBase, apiKey, model, systemPrompt})
-   state.showConfig = false
-   res.cookie(CONFIG_COOKIE, encrypt(JSON.stringify(state.config)), {
-    httpOnly: true,
-    secure: app.get('env') === 'production',
-    maxAge: 365 * 24 * 60 * 60 * 1000,
-    sameSite: 'Strict'
-   })
-   break
+		case 'saveSettings':
+			Object.assign(state.config, { urlBase, apiKey, model, systemPrompt });
+			state.showConfig = false;
+			res.cookie(CONFIG_COOKIE, encrypt(JSON.stringify(state.config)), {
+				httpOnly: true,
+				secure: app.get('env') === 'production',
+				maxAge: 365 * 24 * 60 * 60 * 1000,
+				sameSite: 'Strict',
+			});
+			break;
 
-  case 'downloadChat':
-   res.setHeader('Content-Disposition', `attachment;filename="${state.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.html"`)
-   res.setHeader('Content-Type', 'text/html')
-   return res.send(await renderPage(state, req, true))
+		case 'downloadChat':
+			res.setHeader(
+				'Content-Disposition',
+				`attachment;filename="${state.title
+					.replace(/[^a-z0-9]/gi, '_')
+					.toLowerCase()}.html"`,
+			);
+			res.setHeader('Content-Type', 'text/html');
+			return res.send(await renderPage(state, req, true));
 
-  case 'refreshTitle':
-   if (state.messages.length) {
-    const result = await callOpenAI(state, [...state.messages, {role: 'user', content: 'Generate a very short (max 5 words) title with emoji at start. Only emoji + title, no other text.'}])
-    state.title = result.ok ? (result.data.choices?.[0]?.message?.content?.trim() ?? 'New Chat 💬').substring(0, 50) : 'Error ❌'
-   }
-   break
+		case 'refreshTitle':
+			if (state.messages.length) {
+				const result = await callOpenAI(state, [
+					...state.messages,
+					{
+						role: 'user',
+						content:
+							'Generate a very short (max 5 words) title with emoji at start. Only emoji + title, no other text.',
+					},
+				]);
+				state.title = result.ok
+					? (
+							result.data.choices?.[0]?.message?.content?.trim() ??
+							'New Chat 💬'
+						).substring(0, 50)
+					: 'Error ❌';
+			}
+			break;
 
-  case 'newChat':
-   return res.send(await renderPage({config: state.config, messages: [], chatId: Date.now().toString(36), title: 'New Chat 💬', showConfig: state.showConfig}))
- }
+		case 'newChat':
+			return res.send(
+				await renderPage({
+					config: state.config,
+					messages: [],
+					chatId: Date.now().toString(36),
+					title: 'New Chat 💬',
+					showConfig: state.showConfig,
+				}),
+			);
+	}
 
- res.send(await renderPage(state))
-})
+	res.send(await renderPage(state));
+});
 
 app.post('/newchat', async (req, res) => {
- const old = getState(req)
- res.send(await renderPage({config: old.config, messages: [], chatId: Date.now().toString(36), title: 'New Chat 💬', showConfig: old.showConfig}))
-})
+	const old = getState(req);
+	res.send(
+		await renderPage({
+			config: old.config,
+			messages: [],
+			chatId: Date.now().toString(36),
+			title: 'New Chat 💬',
+			showConfig: old.showConfig,
+		}),
+	);
+});
 
-// ===========================
-// INICIAR SERVIDOR
-// ===========================
-
-const PORT = process.env.PORT || 3000
-app.listen(PORT, () => {
- console.log(`🚀 Servidor combo funcionando en http://localhost:${PORT}`)
- console.log(`📁 Página estática: http://localhost:${PORT}/client`)
- console.log(`💬 Página VIEWSTATE: http://localhost:${PORT}/`)
- console.log(`🔥 Proxy transparente: http://localhost:${PORT}/v1/*`)
- console.log(`   - Reenvía Authorization header del cliente`)
- console.log(`   - No usa API key del servidor`)
-})
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Chat en http://localhost:${PORT}`));
