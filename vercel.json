@@ -1,22 +1,23 @@
 {
-  "version": 2,
-  "functions": {
-    "multi-llm-proxy.js": {
-      "includeFiles": "config.yaml"
-    }
-  },
-  "builds": [
-    { "src": "multi-llm-proxy.js", "use": "@vercel/node" },
-    { "src": "index.html", "use": "@vercel/static" }
-  ],
-  "routes": [
-    {
-      "src": "/index.html",
-      "dest": "index.html"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "multi-llm-proxy.js"
-    }
-  ]
+	"version": 2,
+	"builds": [
+		{
+			"src": "app.js",
+			"use": "@vercel/node"
+		},
+		{
+			"src": "index.html",
+			"use": "@vercel/static"
+		}
+	],
+	"routes": [
+		{
+			"src": "/(?!index.html).*",
+			"dest": "app.js"
+		},
+		{
+			"src": "/index.html",
+			"dest": "index.html"
+		}
+	]
 }
