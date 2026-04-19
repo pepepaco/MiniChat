@@ -133,9 +133,6 @@ function Invoke-OpenAIChat {
         $response  = Invoke-RestMethod -Uri $script:ApiEndpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8"
 
         $content = $response.choices[0].message.content
-        # Fix encoding quirk
-        $bytes   = [System.Text.Encoding]::GetEncoding('ISO-8859-1').GetBytes($content)
-        $content = [System.Text.Encoding]::UTF8.GetString($bytes)
 
         if ($script:DebugMode) {
             Write-ColorOutput "─── RESPONSE ───`n$content`n────────────────`n" $Colors.Warning
