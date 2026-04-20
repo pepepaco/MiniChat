@@ -32,52 +32,110 @@ function Show-Banner {
     Write-ColorOutput "`n╔══════════════════════════════════════════════════════════════╗" $Colors.Info
     Write-ColorOutput "║        Intelligent PowerShell  ·  Agentic AI Shell  v3.0      ║" $Colors.Info
     Write-ColorOutput "╚══════════════════════════════════════════════════════════════╝`n" $Colors.Info
-    Write-ColorOutput "  Commands: install | history | clear | debug | exit`n" $Colors.Warning
+    Write-ColorOutput "  Comandos: install (reconfigurar) | history | clear | debug | exit`n" $Colors.Warning
+}
+
+function Read-NonEmptyInput {
+    param([string]$Prompt, [string]$Default = "", [bool]$Secret = $false)
+    while ($true) {
+        $display = if ($Default) { "$Prompt [$Default]: " } else { "${Prompt}: " }
+        Write-Host $display -NoNewline -ForegroundColor $Colors.Warning
+        $value = if ($Secret) { 
+            $secure = Read-Host -AsSecureString
+            [Runtime.InteropServices.Marshal]::PtrToStringAuto(
+                [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+        } else { 
+            Read-Host 
+        }
+        $value = $value.Trim()
+        if ($value)    { return $value }
+        if ($Default)  { return $Default }
+        Write-ColorOutput "  ⚠ Este campo es obligatorio." $Colors.Error
+    }
 }
 
 function Test-Configuration {
-    try {
-        Write-ColorOutput "Verifying configuration..." $Colors.Info
+    Write-ColorOutput "Verificando configuración..." $Colors.Info
+    $script:PSVersion = "{0}.{1}" -f $PSVersionTable.PSVersion.Major, $PSVersionTable.PSVersion.Minor
+    $changed = $false
 
-        if (-not $env:OPENAI_API_KEY) {
-            throw "OPENAI_API_KEY not found. Set it with: `$env:OPENAI_API_KEY = 'your-key'"
+    # ── API Key ───────────────────────────────────────────────────────────────
+    if (-not $env:OPENAI_API_KEY) {
+        Write-ColorOutput "`n  No se encontró OPENAI_API_KEY." $Colors.Warning
+        $key = Read-NonEmptyInput -Prompt "  Ingresa tu API Key de OpenAI" -Secret $true
+        $env:OPENAI_API_KEY = $key
+        $changed = $true
+    }
+
+    # ── Endpoint ──────────────────────────────────────────────────────────────
+    $defaultEndpoint = "https://api.openai.com/v1/chat/completions"
+    if (-not $env:OPENAI_API_ENDPOINT) {
+        Write-ColorOutput "`n  No se encontró OPENAI_API_ENDPOINT." $Colors.Warning
+        $ep = Read-NonEmptyInput -Prompt "  Endpoint de la API" -Default $defaultEndpoint
+        $env:OPENAI_API_ENDPOINT = $ep
+        $changed = $true
+    }
+    $script:ApiEndpoint = $env:OPENAI_API_ENDPOINT
+
+    # ── Model ─────────────────────────────────────────────────────────────────
+    $defaultModel = "gpt-4o"
+    if (-not $env:OPENAI_MODEL) {
+        Write-ColorOutput "`n  No se encontró OPENAI_MODEL." $Colors.Warning
+        $mdl = Read-NonEmptyInput -Prompt "  Modelo a usar" -Default $defaultModel
+        $env:OPENAI_MODEL = $mdl
+        $changed = $true
+    }
+    $script:Model = $env:OPENAI_MODEL
+
+    # ── Persistir si hubo cambios ─────────────────────────────────────────────
+    if ($changed) {
+        Write-ColorOutput "`n  ¿Guardar estos valores permanentemente? (s/n): " $Colors.Warning
+        Write-Host "" -NoNewline
+        $save = (Read-Host).Trim().ToLower()
+        if ($save -eq "s" -or $save -eq "si" -or $save -eq "y" -or $save -eq "yes") {
+            Save-Configuration
+        } else {
+            Write-ColorOutput "  ⚠ Variables definidas solo para esta sesión.`n" $Colors.Warning
         }
-
-        $script:PSVersion    = "{0}.{1}" -f $PSVersionTable.PSVersion.Major, $PSVersionTable.PSVersion.Minor
-        $script:ApiEndpoint  = if ($env:OPENAI_API_ENDPOINT) { $env:OPENAI_API_ENDPOINT } else { "https://api.openai.com/v1/chat/completions" }
-        $script:Model        = if ($env:OPENAI_MODEL)        { $env:OPENAI_MODEL }        else { "gpt-4o" }
-
-        Write-ColorOutput "✓ Key: set  |  Endpoint: $script:ApiEndpoint  |  Model: $script:Model  |  PS: $script:PSVersion`n" $Colors.Success
-        return $true
     }
-    catch {
-        Write-ColorOutput "ERROR: $($_.Exception.Message)" $Colors.Error
-        return $false
-    }
+
+    Write-ColorOutput "✓ Key: set  |  Endpoint: $script:ApiEndpoint  |  Model: $script:Model  |  PS: $script:PSVersion`n" $Colors.Success
+    return $true
 }
 
-function Install-Configuration {
+function Save-Configuration {
     try {
-        Write-ColorOutput "`nPersisting to User environment..." $Colors.Info
-        if ($env:OPENAI_API_KEY) {
-            [Environment]::SetEnvironmentVariable("OPENAI_API_KEY", $env:OPENAI_API_KEY, "User")
-            Write-ColorOutput "✓ OPENAI_API_KEY saved" $Colors.Success
-        }
-        [Environment]::SetEnvironmentVariable("OPENAI_API_ENDPOINT", $script:ApiEndpoint, "User")
-        [Environment]::SetEnvironmentVariable("OPENAI_MODEL",        $script:Model,       "User")
-        Write-ColorOutput "✓ Endpoint and Model saved" $Colors.Success
+        [Environment]::SetEnvironmentVariable("OPENAI_API_KEY",      $env:OPENAI_API_KEY,      "User")
+        [Environment]::SetEnvironmentVariable("OPENAI_API_ENDPOINT", $env:OPENAI_API_ENDPOINT, "User")
+        [Environment]::SetEnvironmentVariable("OPENAI_MODEL",        $env:OPENAI_MODEL,        "User")
 
         $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
         $userPath  = [Environment]::GetEnvironmentVariable("Path", "User")
         if ($userPath -notlike "*$scriptDir*") {
             [Environment]::SetEnvironmentVariable("Path", "$userPath;$scriptDir".Trim(';'), "User")
-            Write-ColorOutput "✓ Added to PATH: $scriptDir" $Colors.Success
-        } else {
-            Write-ColorOutput "✓ Already in PATH" $Colors.Success
+            Write-ColorOutput "  ✓ Directorio añadido al PATH: $scriptDir" $Colors.Success
         }
-        Write-ColorOutput "`n✓ Done. Open a NEW PowerShell window to pick up saved variables.`n" $Colors.Success
+        Write-ColorOutput "  ✓ Configuración guardada permanentemente.`n" $Colors.Success
     }
-    catch { Write-ColorOutput "ERROR: $($_.Exception.Message)" $Colors.Error }
+    catch { Write-ColorOutput "  ERROR al guardar: $($_.Exception.Message)" $Colors.Error }
+}
+
+function Install-Configuration {
+    Write-ColorOutput "`n─── Reconfiguración manual ───" $Colors.Info
+
+    Write-ColorOutput "  API Key actual: $(if($env:OPENAI_API_KEY){'[definida]'}else{'[no definida]'})" $Colors.Dim
+    $key = Read-NonEmptyInput -Prompt "  Nueva API Key (Enter para conservar)" -Default $env:OPENAI_API_KEY -Secret $true
+    $env:OPENAI_API_KEY = $key
+
+    $ep = Read-NonEmptyInput -Prompt "  Endpoint" -Default $script:ApiEndpoint
+    $env:OPENAI_API_ENDPOINT = $ep
+    $script:ApiEndpoint = $ep
+
+    $mdl = Read-NonEmptyInput -Prompt "  Modelo" -Default $script:Model
+    $env:OPENAI_MODEL = $mdl
+    $script:Model = $mdl
+
+    Save-Configuration
 }
 
 function Add-ToHistory {
