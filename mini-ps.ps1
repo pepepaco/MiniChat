@@ -1,501 +1,233 @@
 #Requires -Version 5.1
-
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding  = [System.Text.Encoding]::UTF8
 $ErrorActionPreference    = "Continue"
 
-# ─────────────────────────────────────────────
-# CONFIGURATION
-# ─────────────────────────────────────────────
-$script:DebugMode        = $false
-$script:MaxHistoryItems  = 60
-$script:MaxOutputLength  = 24000
-$script:MaxAgentSteps    = 12          # safety brake – max commands per user turn
-$script:ConversationHistory = @()
+$script:DebugMode    = $false
+$script:MaxSteps     = 12
+$script:MaxOutput    = 24000
+$script:MaxHistory   = 60
+$script:History      = @()
+$C = @{ I="Cyan"; S="Green"; E="Red"; W="Yellow"; M="Magenta"; A="Blue"; D="DarkGray" }
 
-$Colors = @{
-    Info    = "Cyan";   Success = "Green";   Error   = "Red"
-    Warning = "Yellow"; Command = "Magenta"; AI      = "Blue"; Dim = "DarkGray"
-}
-
-# ─────────────────────────────────────────────
-# UTILITY
-# ─────────────────────────────────────────────
-
-function Write-ColorOutput {
-    param([string]$Message, [string]$Color = "White")
-    Write-Host $Message -ForegroundColor $Color
-}
+function Write-C { param($Msg, $Col="White"); Write-Host $Msg -ForegroundColor $Col }
 
 function Show-Banner {
     Clear-Host
-    Write-ColorOutput "`n╔══════════════════════════════════════════════════════════════╗" $Colors.Info
-    Write-ColorOutput "║        Intelligent PowerShell  ·  Agentic AI Shell  v3.0      ║" $Colors.Info
-    Write-ColorOutput "╚══════════════════════════════════════════════════════════════╝`n" $Colors.Info
-    Write-ColorOutput "  Comandos: install (reconfigurar) | history | clear | debug | exit`n" $Colors.Warning
+    Write-C "`n╔══════════════════════════════════════════════════════════╗" $C.I
+    Write-C "║      Intelligent PowerShell  ·  Agentic AI Shell  v3.0   ║" $C.I
+    Write-C "╚══════════════════════════════════════════════════════════╝`n" $C.I
+    Write-C "  Commands: install | history | clear | debug | exit`n" $C.W
 }
 
-function Read-NonEmptyInput {
-    param([string]$Prompt, [string]$Default = "", [bool]$Secret = $false)
+function Read-Field {
+    param($Prompt, $Default="", [switch]$Secret)
     while ($true) {
-        $display = if ($Default) { "$Prompt [$Default]: " } else { "${Prompt}: " }
-        Write-Host $display -NoNewline -ForegroundColor $Colors.Warning
-        $value = if ($Secret) { 
-            $secure = Read-Host -AsSecureString
-            [Runtime.InteropServices.Marshal]::PtrToStringAuto(
-                [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-        } else { 
-            Read-Host 
-        }
-        $value = $value.Trim()
-        if ($value)    { return $value }
-        if ($Default)  { return $Default }
-        Write-ColorOutput "  ⚠ Este campo es obligatorio." $Colors.Error
+        $label = if ($Default) { "$Prompt [$Default]: " } else { "${Prompt}: " }
+        Write-Host $label -NoNewline -ForegroundColor $C.W
+        $v = if ($Secret) {
+            $s = Read-Host -AsSecureString
+            [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+        } else { Read-Host }
+        $v = $v.Trim()
+        if ($v)       { return $v }
+        if ($Default) { return $Default }
+        Write-C "  This field is required." $C.E
     }
 }
 
-function Test-Configuration {
-    Write-ColorOutput "Verificando configuración..." $Colors.Info
-    $script:PSVersion = "{0}.{1}" -f $PSVersionTable.PSVersion.Major, $PSVersionTable.PSVersion.Minor
+function Save-Config {
+    [Environment]::SetEnvironmentVariable("OPENAI_API_KEY",      $env:OPENAI_API_KEY,      "User")
+    [Environment]::SetEnvironmentVariable("OPENAI_API_ENDPOINT", $env:OPENAI_API_ENDPOINT, "User")
+    [Environment]::SetEnvironmentVariable("OPENAI_MODEL",        $env:OPENAI_MODEL,        "User")
+    $dir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+    $p   = [Environment]::GetEnvironmentVariable("Path","User")
+    if ($p -notlike "*$dir*") { [Environment]::SetEnvironmentVariable("Path","$p;$dir".Trim(';'),"User") }
+    Write-C "  ✓ Configuration saved permanently.`n" $C.S
+}
+
+function Test-Config {
+    $script:PSVer = "{0}.{1}" -f $PSVersionTable.PSVersion.Major, $PSVersionTable.PSVersion.Minor
     $changed = $false
-
-    # ── API Key ───────────────────────────────────────────────────────────────
     if (-not $env:OPENAI_API_KEY) {
-        Write-ColorOutput "`n  No se encontró OPENAI_API_KEY." $Colors.Warning
-        $key = Read-NonEmptyInput -Prompt "  Ingresa tu API Key de OpenAI" -Secret $true
-        $env:OPENAI_API_KEY = $key
-        $changed = $true
+        $env:OPENAI_API_KEY = Read-Field "OpenAI API Key" -Secret; $changed = $true
     }
-
-    # ── Endpoint ──────────────────────────────────────────────────────────────
-    $defaultEndpoint = "https://api.openai.com/v1/chat/completions"
     if (-not $env:OPENAI_API_ENDPOINT) {
-        Write-ColorOutput "`n  No se encontró OPENAI_API_ENDPOINT." $Colors.Warning
-        $ep = Read-NonEmptyInput -Prompt "  Endpoint de la API" -Default $defaultEndpoint
-        $env:OPENAI_API_ENDPOINT = $ep
-        $changed = $true
+        $env:OPENAI_API_ENDPOINT = Read-Field "API Endpoint" "https://api.openai.com/v1/chat/completions"; $changed = $true
     }
-    $script:ApiEndpoint = $env:OPENAI_API_ENDPOINT
-
-    # ── Model ─────────────────────────────────────────────────────────────────
-    $defaultModel = "gpt-4o"
     if (-not $env:OPENAI_MODEL) {
-        Write-ColorOutput "`n  No se encontró OPENAI_MODEL." $Colors.Warning
-        $mdl = Read-NonEmptyInput -Prompt "  Modelo a usar" -Default $defaultModel
-        $env:OPENAI_MODEL = $mdl
-        $changed = $true
+        $env:OPENAI_MODEL = Read-Field "Model" "gpt-4o"; $changed = $true
     }
-    $script:Model = $env:OPENAI_MODEL
-
-    # ── Persistir si hubo cambios ─────────────────────────────────────────────
+    $script:Endpoint = $env:OPENAI_API_ENDPOINT
+    $script:Model    = $env:OPENAI_MODEL
     if ($changed) {
-        Write-ColorOutput "`n  ¿Guardar estos valores permanentemente? (s/n): " $Colors.Warning
-        Write-Host "" -NoNewline
-        $save = (Read-Host).Trim().ToLower()
-        if ($save -eq "s" -or $save -eq "si" -or $save -eq "y" -or $save -eq "yes") {
-            Save-Configuration
-        } else {
-            Write-ColorOutput "  ⚠ Variables definidas solo para esta sesión.`n" $Colors.Warning
-        }
+        Write-Host "  Save permanently? (y/n): " -NoNewline -ForegroundColor $C.W
+        if ((Read-Host).Trim() -match "^(y|yes)$") { Save-Config }
+        else { Write-C "  Session-only. Run 'install' to save later.`n" $C.W }
     }
-
-    Write-ColorOutput "✓ Key: set  |  Endpoint: $script:ApiEndpoint  |  Model: $script:Model  |  PS: $script:PSVersion`n" $Colors.Success
-    return $true
+    Write-C "✓ Key: set | Endpoint: $script:Endpoint | Model: $script:Model | PS: $script:PSVer`n" $C.S
 }
 
-function Save-Configuration {
-    try {
-        [Environment]::SetEnvironmentVariable("OPENAI_API_KEY",      $env:OPENAI_API_KEY,      "User")
-        [Environment]::SetEnvironmentVariable("OPENAI_API_ENDPOINT", $env:OPENAI_API_ENDPOINT, "User")
-        [Environment]::SetEnvironmentVariable("OPENAI_MODEL",        $env:OPENAI_MODEL,        "User")
-
-        $scriptDir = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-        $userPath  = [Environment]::GetEnvironmentVariable("Path", "User")
-        if ($userPath -notlike "*$scriptDir*") {
-            [Environment]::SetEnvironmentVariable("Path", "$userPath;$scriptDir".Trim(';'), "User")
-            Write-ColorOutput "  ✓ Directorio añadido al PATH: $scriptDir" $Colors.Success
-        }
-        Write-ColorOutput "  ✓ Configuración guardada permanentemente.`n" $Colors.Success
-    }
-    catch { Write-ColorOutput "  ERROR al guardar: $($_.Exception.Message)" $Colors.Error }
+function Install-Config {
+    Write-C "`n─── Reconfigure ───" $C.I
+    Write-C "  API Key: $(if($env:OPENAI_API_KEY){'[set]'}else{'[not set]'})" $C.D
+    $env:OPENAI_API_KEY      = Read-Field "New API Key (Enter to keep)" $env:OPENAI_API_KEY -Secret
+    $env:OPENAI_API_ENDPOINT = Read-Field "Endpoint" $script:Endpoint
+    $env:OPENAI_MODEL        = Read-Field "Model"    $script:Model
+    $script:Endpoint = $env:OPENAI_API_ENDPOINT
+    $script:Model    = $env:OPENAI_MODEL
+    Save-Config
 }
 
-function Install-Configuration {
-    Write-ColorOutput "`n─── Reconfiguración manual ───" $Colors.Info
-
-    Write-ColorOutput "  API Key actual: $(if($env:OPENAI_API_KEY){'[definida]'}else{'[no definida]'})" $Colors.Dim
-    $key = Read-NonEmptyInput -Prompt "  Nueva API Key (Enter para conservar)" -Default $env:OPENAI_API_KEY -Secret $true
-    $env:OPENAI_API_KEY = $key
-
-    $ep = Read-NonEmptyInput -Prompt "  Endpoint" -Default $script:ApiEndpoint
-    $env:OPENAI_API_ENDPOINT = $ep
-    $script:ApiEndpoint = $ep
-
-    $mdl = Read-NonEmptyInput -Prompt "  Modelo" -Default $script:Model
-    $env:OPENAI_MODEL = $mdl
-    $script:Model = $mdl
-
-    Save-Configuration
-}
-
-function Add-ToHistory {
-    param([string]$Role, [string]$Content)
-    if ($Content.Length -gt $script:MaxOutputLength) {
-        $Content = $Content.Substring(0, $script:MaxOutputLength) + "`n... [truncated – $($Content.Length) chars total]"
-    }
-    $script:ConversationHistory += @{ role = $Role; content = $Content }
-
-    # Trim to budget – keep system message
-    $nonSystem = $script:ConversationHistory | Where-Object { $_.role -ne "system" }
-    if ($nonSystem.Count -gt ($script:MaxHistoryItems * 2)) {
-        $sys    = $script:ConversationHistory | Where-Object { $_.role -eq "system" }
-        $recent = $nonSystem | Select-Object -Last ($script:MaxHistoryItems * 2)
-        $script:ConversationHistory = @($sys) + $recent
+function Add-History {
+    param($Role, $Content)
+    if ($Content.Length -gt $script:MaxOutput) { $Content = $Content.Substring(0,$script:MaxOutput) + "`n...[truncated]" }
+    $script:History += @{ role=$Role; content=$Content }
+    $ns = $script:History | Where-Object { $_.role -ne "system" }
+    if ($ns.Count -gt $script:MaxHistory * 2) {
+        $script:History = @($script:History | Where-Object { $_.role -eq "system" }) + ($ns | Select-Object -Last ($script:MaxHistory * 2))
     }
 }
 
 function Show-History {
-    Write-ColorOutput "`n═══ CONVERSATION HISTORY ═══" $Colors.Info
-    $items = $script:ConversationHistory | Where-Object { $_.role -ne "system" }
-    if ($items.Count -eq 0) { Write-ColorOutput "  (empty)" $Colors.Warning; return }
-    for ($i = 0; $i -lt $items.Count; $i++) {
-        $label = if ($items[$i].role -eq "user") { "User" } else { "Agent" }
-        $color = if ($items[$i].role -eq "user") { $Colors.Info } else { $Colors.AI }
-        Write-ColorOutput "`n[$label #$($i+1)]" $color
+    Write-C "`n═══ HISTORY ═══" $C.I
+    $items = $script:History | Where-Object { $_.role -ne "system" }
+    if (-not $items) { Write-C "  (empty)" $C.W; return }
+    for ($i=0; $i -lt $items.Count; $i++) {
+        $col = if ($items[$i].role -eq "user") { $C.I } else { $C.A }
+        Write-C "`n[$(if($items[$i].role -eq 'user'){'User'}else{'Agent'}) #$($i+1)]" $col
         Write-Host $items[$i].content
     }
-    Write-ColorOutput "`n════════════════════════════`n" $Colors.Info
+    Write-C "`n════════════════`n" $C.I
 }
 
-# ─────────────────────────────────────────────
-# API CALL
-# ─────────────────────────────────────────────
+function Invoke-AI {
+    $body = @{
+        model           = $script:Model
+        messages        = @($script:History | ForEach-Object { @{role=$_.role; content=$_.content} })
+        temperature     = 0.2
+        response_format = @{ type="json_object" }
+    } | ConvertTo-Json -Depth 8
 
-function Invoke-OpenAIChat {
-    try {
-        $messages = $script:ConversationHistory | ForEach-Object { @{ role = $_.role; content = $_.content } }
+    if ($script:DebugMode) { Write-C "`n─── REQUEST ───`n$body`n" $C.W }
 
-        $payload = @{
-            model           = $script:Model
-            messages        = $messages
-            temperature     = 0.2
-            response_format = @{ type = "json_object" }
-        } | ConvertTo-Json -Depth 8
+    $resp = Invoke-RestMethod -Uri $script:Endpoint -Method Post -Body ([System.Text.Encoding]::UTF8.GetBytes($body)) `
+        -Headers @{ Authorization="Bearer $env:OPENAI_API_KEY" } -ContentType "application/json; charset=utf-8"
 
-        if ($script:DebugMode) {
-            Write-ColorOutput "`n─── REQUEST ───`n$payload`n───────────────`n" $Colors.Warning
-        }
-
-        $headers   = @{ "Authorization" = "Bearer $env:OPENAI_API_KEY"; "Content-Type" = "application/json; charset=utf-8" }
-        $bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
-        $response  = Invoke-RestMethod -Uri $script:ApiEndpoint -Method Post -Headers $headers -Body $bodyBytes -ContentType "application/json; charset=utf-8"
-
-        $content = $response.choices[0].message.content
-
-        if ($script:DebugMode) {
-            Write-ColorOutput "─── RESPONSE ───`n$content`n────────────────`n" $Colors.Warning
-        }
-        return $content
-    }
-    catch {
-        Write-ColorOutput "`nAPI ERROR: $($_.Exception.Message)" $Colors.Error
-        if ($_.ErrorDetails) { Write-ColorOutput $_.ErrorDetails.Message $Colors.Error }
-        return $null
-    }
+    $out = $resp.choices[0].message.content
+    if ($script:DebugMode) { Write-C "─── RESPONSE ───`n$out`n" $C.W }
+    return $out
 }
 
-# ─────────────────────────────────────────────
-# COMMAND EXECUTION
-# ─────────────────────────────────────────────
-
-function Invoke-PowerShellCommand {
-    param([string]$Command)
-    try {
-        Write-ColorOutput "`n  ► $Command" $Colors.Command
-        $global:LASTEXITCODE = 0
-        $output = Invoke-Expression $Command 2>&1 | Out-String
-        if ($global:LASTEXITCODE -gt 0) { throw "Exit code $global:LASTEXITCODE" }
-        return @{ Success = $true; Output = $output.Trim() }
+function Get-FirstJson {
+    param($Raw)
+    try { return $Raw | ConvertFrom-Json } catch {}
+    $d=0; $s=-1
+    for ($i=0; $i -lt $Raw.Length; $i++) {
+        if ($Raw[$i] -eq '{') { if ($d -eq 0) { $s=$i }; $d++ }
+        elseif ($Raw[$i] -eq '}') { $d--; if ($d -eq 0 -and $s -ge 0) { return $Raw.Substring($s,$i-$s+1) | ConvertFrom-Json } }
     }
-    catch {
-        $msg = $_.Exception.Message
-        $type = if ($msg -match "not recognized|no se reconoce") { "CommandNotFound" } else { "ExecutionError" }
-        return @{ Success = $false; Error = "$type`: $msg" }
-    }
+    throw "No JSON found in response"
 }
 
-# ─────────────────────────────────────────────
-# AGENTIC LOOP
-# ─────────────────────────────────────────────
-#
-#  Each turn the agent returns JSON with one of three actions:
-#
-#    { "action": "run",      "command": "...", "thought": "..." }
-#        → execute command, feed result back, keep looping
-#
-#    { "action": "ask",      "question": "...", "thought": "..." }
-#        → ask the user for clarification, then continue
-#
-#    { "action": "done",     "answer": "...",   "thought": "..." }
-#        → final answer to the user, end loop
-#
-# ─────────────────────────────────────────────
+function Invoke-Command-Safe {
+    param($Cmd)
+    Write-C "`n  ► $Cmd" $C.M
+    $global:LASTEXITCODE = 0
+    $out = Invoke-Expression $Cmd 2>&1 | Out-String
+    if ($global:LASTEXITCODE -gt 0) { return @{ Success=$false; Error="Exit code $global:LASTEXITCODE`n$out" } }
+    return @{ Success=$true; Output=$out.Trim() }
+}
 
 function Invoke-AgentTurn {
-    param([string]$UserInput)
+    Write-Host ""
+    for ($step=1; $step -le $script:MaxSteps; $step++) {
+        Write-C "  🤖 Thinking (step $step)..." $C.D
 
-    Write-ColorOutput "" "White"
+        $raw      = Invoke-AI
+        $response = Get-FirstJson $raw
+        $action   = ($response.action + "").ToLower().Trim()
 
-    $stepCount = 0
+        if ($script:DebugMode -and $response.thought) { Write-C "  [thought] $($response.thought)" $C.D }
 
-    while ($stepCount -lt $script:MaxAgentSteps) {
-        $stepCount++
-        Write-ColorOutput "  🤖 Thinking (step $stepCount)..." $Colors.Dim
-
-        $raw = Invoke-OpenAIChat
-        if (-not $raw) {
-            Write-ColorOutput "No response from API." $Colors.Error
-            return
-        }
-
-        # ── Parse (robust) ─────────────────────────────────────────────────────
-        # The API occasionally returns extra text or multiple JSON blocks.
-        # Strategy: find the FIRST complete {...} object in the raw string.
-        $response = $null
-        $jsonCandidate = $null
-
-        # 1) Try the whole string first (fast path)
-        try {
-            $response = $raw | ConvertFrom-Json
-        }
-        catch {
-            # 2) Extract the first balanced {...} block
-            $depth = 0; $start = -1; $jsonCandidate = $null
-            for ($ci = 0; $ci -lt $raw.Length; $ci++) {
-                $ch = $raw[$ci]
-                if ($ch -eq '{') {
-                    if ($depth -eq 0) { $start = $ci }
-                    $depth++
-                } elseif ($ch -eq '}') {
-                    $depth--
-                    if ($depth -eq 0 -and $start -ge 0) {
-                        $jsonCandidate = $raw.Substring($start, $ci - $start + 1)
-                        break
-                    }
-                }
+        switch ($action) {
+            "done" {
+                $answer = if ($response.answer) { $response.answer } else { $response.explanation }
+                Write-C "`n💬 " $C.A; Write-Host $answer
+                Add-History "assistant" $answer
+                return
             }
-
-            if ($jsonCandidate) {
-                try { $response = $jsonCandidate | ConvertFrom-Json }
-                catch {
-                    Write-ColorOutput "Could not parse agent JSON: $($_.Exception.Message)" $Colors.Error
-                    if ($script:DebugMode) { Write-ColorOutput "Raw: $raw" $Colors.Warning }
-                    return
-                }
-            } else {
-                Write-ColorOutput "No JSON object found in response." $Colors.Error
-                if ($script:DebugMode) { Write-ColorOutput "Raw: $raw" $Colors.Warning }
+            "ask" {
+                Write-C "`n❓ $($response.question)" $C.W
+                Add-History "assistant" "[ASK] $($response.question)"
+                Write-Host "`nYou: " -NoNewline -ForegroundColor $C.I
+                $ans = (Read-Host).Trim(); if (-not $ans) { $ans = "(no answer)" }
+                Add-History "user" "[CLARIFICATION] $ans"
+            }
+            "run" {
+                $cmd = ($response.command + "").Trim()
+                if (-not $cmd) { Write-C "Agent returned 'run' with no command." $C.E; return }
+                if ($response.thought -and -not $script:DebugMode) { Write-C "  💭 $($response.thought)" $C.D }
+                $result = Invoke-Command-Safe $cmd
+                $status = if ($result.Success) { $tag="OUTPUT"; Write-C "  ✓ Done" $C.S; $result.Output } else { $tag="ERROR"; Write-C "  ✗ $($result.Error)" $C.E; $result.Error }
+                Add-History "assistant" "[STEP $step] RAN: $cmd`n[$tag]`n$status"
+            }
+            default {
+                $fallback = if ($response.answer) { $response.answer } elseif ($response.explanation) { $response.explanation } else { $raw }
+                Write-C "`n💬 " $C.A; Write-Host $fallback
+                Add-History "assistant" $fallback
                 return
             }
         }
-
-        $action = ($response.action + "").ToLower().Trim()
-
-        # Optional: show reasoning in debug mode
-        if ($script:DebugMode -and $response.thought) {
-            Write-ColorOutput "  [thought] $($response.thought)" $Colors.Dim
-        }
-
-        # ── DONE ──────────────────────────────────────────────────────────────
-        if ($action -eq "done") {
-            $answer = if ($response.answer) { $response.answer } else { $response.explanation }
-            Write-ColorOutput "`n💬 " $Colors.AI
-            Write-Host $answer
-            Add-ToHistory -Role "assistant" -Content $answer
-            Write-ColorOutput "" "White"
-            return
-        }
-
-        # ── ASK ───────────────────────────────────────────────────────────────
-        if ($action -eq "ask") {
-            Write-ColorOutput "`n❓ $($response.question)" $Colors.Warning
-            Add-ToHistory -Role "assistant" -Content "[AGENT ASKS] $($response.question)"
-            Write-Host ""
-            Write-Host "You: " -NoNewline -ForegroundColor $Colors.Info
-            $clarification = Read-Host
-            if (-not $clarification.Trim()) { $clarification = "(no answer)" }
-            Add-ToHistory -Role "user" -Content "[CLARIFICATION] $clarification"
-            # Loop continues – agent now has the clarification in history
-            continue
-        }
-
-        # ── RUN ───────────────────────────────────────────────────────────────
-        if ($action -eq "run") {
-            $cmd = ($response.command + "").Trim()
-            if (-not $cmd) {
-                Write-ColorOutput "Agent returned 'run' but no command – stopping." $Colors.Error
-                return
-            }
-
-            if ($response.thought -and -not $script:DebugMode) {
-                Write-ColorOutput "  💭 $($response.thought)" $Colors.Dim
-            }
-
-            $result = Invoke-PowerShellCommand -Command $cmd
-
-            if ($result.Success) {
-                $out = if ($result.Output) { $result.Output } else { "<no output>" }
-                Write-ColorOutput "  ✓ Done" $Colors.Success
-
-                $toolMsg = @"
-[STEP $stepCount] RAN: $cmd
-
-[OUTPUT]
-$out
-"@
-                Add-ToHistory -Role "assistant" -Content $toolMsg
-            }
-            else {
-                Write-ColorOutput "  ✗ $($result.Error)" $Colors.Error
-
-                $toolMsg = @"
-[STEP $stepCount] RAN: $cmd
-
-[ERROR]
-$($result.Error)
-"@
-                Add-ToHistory -Role "assistant" -Content $toolMsg
-            }
-
-            # Loop: agent will see the output and decide what to do next
-            continue
-        }
-
-        # ── Unknown action fallback ────────────────────────────────────────────
-        # Old-style response (plain explanation, no action field) → treat as done
-        $fallback = if ($response.answer)      { $response.answer }
-                    elseif ($response.explanation) { $response.explanation }
-                    else { $raw }
-
-        Write-ColorOutput "`n💬 " $Colors.AI
-        Write-Host $fallback
-        Add-ToHistory -Role "assistant" -Content $fallback
-        Write-ColorOutput "" "White"
-        return
     }
-
-    Write-ColorOutput "`n⚠️  Agent reached the step limit ($script:MaxAgentSteps). Stopping." $Colors.Warning
+    Write-C "`n⚠️  Step limit ($script:MaxSteps) reached." $C.W
 }
 
-# ─────────────────────────────────────────────
-# ENTRY POINT
-# ─────────────────────────────────────────────
-
-function Start-IntelligentPowerShell {
+function Start-Shell {
     Show-Banner
-    if (-not (Test-Configuration)) { return }
+    Test-Config
 
-    # ── System Prompt ────────────────────────────────────────────────────────
-    $systemPrompt = @"
-You are an autonomous PowerShell agent running on a live Windows machine (PS $script:PSVersion).
-Your job is to fully resolve the user's request by executing as many commands as needed, inspecting
-results, and iterating — exactly like a skilled human sysadmin would.
+    Add-History "system" @"
+You are an autonomous PowerShell agent on a live Windows machine (PS $script:PSVer).
+Resolve the user's request by running as many commands as needed, inspecting results, and iterating.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RESPONSE FORMAT — always return valid JSON with an "action" field:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Always respond with a single JSON object using one of these actions:
 
-1. Execute a command:
-{
-  "action":  "run",
-  "thought": "Why you are running this command (your internal reasoning)",
-  "command": "The exact PowerShell command to execute"
-}
+Run a command:
+{ "action": "run", "thought": "<reasoning>", "command": "<powershell command>" }
 
-2. Ask the user for missing information:
-{
-  "action":   "ask",
-  "thought":  "What you need and why",
-  "question": "The specific question for the user"
-}
+Ask the user:
+{ "action": "ask", "thought": "<why>", "question": "<question>" }
 
-3. Finish — when the task is fully done OR the question is answered without needing a command:
-{
-  "action": "done",
-  "thought": "Summary of what you did",
-  "answer": "Final response to the user (human-readable, clear, concise)"
-}
+Finish:
+{ "action": "done", "thought": "<summary>", "answer": "<final answer>" }
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-AGENTIC BEHAVIOUR RULES:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-• Plan before acting. Use "thought" to reason step-by-step.
-• Explore before concluding. If the first command gives incomplete info, run more.
-• Self-correct. If a command errors, understand why and try a different approach.
-• Chain commands. Use results from step N to decide what to do in step N+1.
-• Never hallucinate output. Only report what the system actually returned.
-• Prefer read-only commands unless the user explicitly asks to change things.
-• For destructive actions (Delete, Stop-Service, Remove-Item, etc.), always confirm
-  intent in "thought" and warn clearly in "answer".
-• Keep answers concise. Summarise output; don't dump raw text unless asked.
-• If a task genuinely cannot be completed (permissions, missing tool, impossible),
-  explain why and suggest alternatives — do not silently fail.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EXAMPLES OF MULTI-STEP REASONING:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-User: "Which process is eating the most CPU?"
-Step 1 → run: Get-Process | Sort-Object CPU -Desc | Select-Object -First 5 | Format-Table Name,CPU,Id -Auto
-Step 2 (after seeing output) → done: "chrome.exe (PID 4821) is using the most CPU at 43%."
-
-User: "Find all log files modified in the last 24h and count the errors in them"
-Step 1 → run: Get-ChildItem C:\ -Recurse -Filter *.log -ErrorAction SilentlyContinue | Where-Object { $_.LastWriteTime -gt (Get-Date).AddHours(-24) } | Select-Object FullName
-Step 2 → run: <iterate over files found, search for ERROR keyword>
-Step 3 → done: "Found 3 log files. Total error lines: 47."
-
-User: "Is port 443 open on google.com?"
-Step 1 → run: Test-NetConnection -ComputerName google.com -Port 443
-Step 2 → done: "Yes, port 443 is open (TcpTestSucceeded: True)."
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-GENERAL KNOWLEDGE QUESTIONS (no command needed):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-If the user asks something you can answer from knowledge alone (e.g. "how does X work?"),
-respond immediately with action "done" — no need to run a command.
+Rules:
+- Use "thought" to reason before acting.
+- Chain commands: use output from step N to decide step N+1.
+- Self-correct on errors; try a different approach.
+- Prefer read-only commands unless user asks to change something.
+- Warn before destructive actions (Remove-Item, Stop-Service, etc.).
+- Answer knowledge questions directly with "done" — no command needed.
+- Never fabricate output; only report what the system actually returned.
 "@
 
-    $script:ConversationHistory = @()
-    Add-ToHistory -Role "system" -Content $systemPrompt
-    Write-ColorOutput "Agent ready. Ask me anything.`n" $Colors.Success
+    Write-C "Agent ready. Ask me anything.`n" $C.S
 
     while ($true) {
-        Write-Host "You: " -NoNewline -ForegroundColor $Colors.Info
-        $userInput = Read-Host
-
-        if (-not $userInput.Trim()) { continue }
-
-        switch -Regex ($userInput.ToLower().Trim()) {
-            "^(exit|quit)$" { Write-ColorOutput "`nGoodbye! 👋`n" $Colors.Success; return }
-            "^install$"     { Install-Configuration; continue }
-            "^history$"     { Show-History; continue }
-            "^clear$"       {
-                $script:ConversationHistory = $script:ConversationHistory | Where-Object { $_.role -eq "system" }
-                Write-ColorOutput "`n✓ History cleared`n" $Colors.Success
-                continue
-            }
-            "^debug$"       {
-                $script:DebugMode = -not $script:DebugMode
-                Write-ColorOutput "`nDebug mode $(if($script:DebugMode){'ON'}else{'OFF'})`n" $Colors.Warning
-                continue
-            }
+        Write-Host "You: " -NoNewline -ForegroundColor $C.I
+        $input = Read-Host
+        if (-not $input.Trim()) { continue }
+        switch -Regex ($input.ToLower().Trim()) {
+            "^(exit|quit)$" { Write-C "`nGoodbye! 👋`n" $C.S; return }
+            "^install$"     { Install-Config; continue }
+            "^history$"     { Show-History;   continue }
+            "^clear$"       { $script:History = @($script:History | Where-Object {$_.role -eq "system"}); Write-C "`n✓ Cleared`n" $C.S; continue }
+            "^debug$"       { $script:DebugMode = -not $script:DebugMode; Write-C "`nDebug $(if($script:DebugMode){'ON'}else{'OFF'})`n" $C.W; continue }
         }
-
-        Add-ToHistory -Role "user" -Content $userInput
-        Invoke-AgentTurn -UserInput $userInput
+        Add-History "user" $input
+        Invoke-AgentTurn
     }
 }
 
-Start-IntelligentPowerShell
+Start-Shell
